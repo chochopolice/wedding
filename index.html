@@ -136,6 +136,11 @@ main{padding-top:var(--header-h)}
 .pin{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.3);pointer-events:none;transition:scale .3s,opacity .3s}
 .pin::after{content:'';position:absolute;inset:-2px;border-radius:50%;border:1px solid #fff;animation:ping 2.2s var(--d,0s) infinite cubic-bezier(.2,.6,.3,1)}
 @keyframes ping{from{scale:1;opacity:.9}to{scale:3.6;opacity:0}}
+/* 目印の大きさ（設定の PINS で切り替え） */
+body[data-pins="small"] .pin{width:5px;height:5px;margin:-2.5px 0 0 -2.5px;box-shadow:0 0 3px rgba(0,0,0,.35)}
+body[data-pins="small"] .pin::after{inset:-1px;animation-name:ping-small}
+@keyframes ping-small{from{scale:1;opacity:.7}to{scale:2.6;opacity:0}}
+body[data-pins="none"] .pin{display:none}
 .hot:hover .pin,.hot:focus-visible .pin{scale:0;opacity:0}
 .tag{position:absolute;left:50%;bottom:100%;translate:-50% -8px;white-space:nowrap;background:rgba(255,255,255,.95);padding:4px 14px;border-radius:999px;font-size:13px;letter-spacing:.1em;box-shadow:0 6px 18px -8px rgba(0,0,0,.35);opacity:0;scale:.92;transition:opacity .3s,scale .3s var(--ease);pointer-events:none}
 .tag em{font-family:var(--en);font-size:16px;color:var(--champagne);margin-right:8px}
@@ -501,6 +506,8 @@ const SCENES = [
   }
 ];
 const START_SCENE = 1; // 最初に表示するシーン（0=街, 1=式場, 2=ビーチ）
+const PINS = 'small';  // 動画の上のクリックできる場所の白い目印：'normal'（通常）／'small'（極小）／'none'（表示しない）
+document.body.dataset.pins = PINS;
 
 /* =====================================================================
    ここから下はプログラム本体（通常は編集不要）
