@@ -486,8 +486,8 @@ const SCENES = [
   {
     id: 'chapel', en: 'The Chapel', ja: '挙式会場', video: 'media/videos/chapel.mp4', draw: 'chapel', petals: true,
     hotspots: [
-      { label: 'Groom', ja: '新郎', go: '#/profile/groom', auto: 'groom', x: 0.385, y: 0.442, w: 0.127, h: 0.534, pin: [.5, 0] },
-      { label: 'Bride', ja: '新婦', go: '#/profile/bride', auto: 'bride', x: 0.483, y: 0.465, w: 0.221, h: 0.505, pin: [.5, 0] },
+      { label: 'Groom', ja: '新郎', go: '#/profile/groom', auto: 'groom', x: .425, y: .53, w: .062, h: .38, pin: [.5, 0] },
+      { label: 'Bride', ja: '新婦', go: '#/profile/bride', auto: 'bride', x: .5, y: .53, w: .098, h: .38, pin: [.5, 0] },
       { label: 'Ceremony', ja: '挙式の写真', go: '#/gallery/ceremony', x: .27, y: .02, w: .46, h: .8, pin: [.5, .26] }
     ]
   },
@@ -1079,11 +1079,94 @@ const GLR = {
 
 /* =====================================================================
    AI 人物追従（MediaPipe Object Detector をブラウザ内で実行）
-   動画の中の人物を検出し、白いドレスの明るさで新郎・新婦を見分ける
+   ・毎回「明るい方＝新婦」と決め直すのをやめ、前回の位置に一番近い人を同じ人として追い続ける
+   ・最初の割り当ては hotspots に書いた位置（新郎は左・新婦は右など）を手がかりにする
+   ・小さすぎる・横長・自信の低い検出（花台や柱の誤検出）は捨てる
+   ・一瞬で大きく飛んだ検出は採用しない（別人や誤検出への乗り換えを防ぐ）
+   ・見失っても4秒はその場に留まり、その後ゆっくり hotspots の位置へ戻る
    ※ 動画は外部に送信されず、閲覧者のブラウザの中だけで処理されます
    ===================================================================== */
+/* TRACKER-START */
+class CoupleTracker {
+  constructor(priors, opt = {}) {
+    this.priors = priors;            // { groom:{x,y,w,h}, bride:{x,y,w,h} } … hotspots に書いた位置
+    this.tracks = {};                // role → {x,y,w,h,seen,hits,lum}
+    this.o = { minScore: .45, minH: .12, holdMs: 4000, smooth: .35, ...opt };
+  }
+  static center(r) { return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; }
+  filter(dets) {
+    const o = this.o;
+    return dets.filter(d => d.score >= o.minScore && d.h >= o.minH && d.h >= d.w * 1.05 && d.w > .01);
+  }
+  /** 役割ごとの「その検出を割り当てたときのコスト」。gate を超えたら割り当て不可 */
+  cost(role, d) {
+    const t = this.tracks[role], ref = t || this.priors[role];
+    if (!ref) return Infinity;
+    const a = CoupleTracker.center(ref), b = CoupleTracker.center(d);
+    const dist = Math.hypot(a.x - b.x, (a.y - b.y) * .6);
+    const size = Math.abs(Math.log((d.h + 1e-3) / (ref.h + 1e-3))) * .08;
+    // 追跡中は前回位置から（人物の幅×1.2 or 0.08）以上は飛ばない。初回は hotspots の位置から 0.3 以内
+    const gate = t ? Math.max(.08, t.w * 1.2) : .3;
+    if (dist > gate) return Infinity;
+    // 明るさ（白いドレス）は迷ったときの決め手程度に弱く効かせる
+    const lum = d.lum == null ? 0 : (role === 'bride' ? (.5 - d.lum) : (d.lum - .5)) * .04;
+    return dist + size + lum;
+  }
+  update(rawDets, now) {
+    const dets = this.filter(rawDets);
+    const roles = Object.keys(this.priors);
+    // 役割 × 検出 の全組み合わせから合計コスト最小の割り当てを選ぶ（人数が少ないので総当たり）
+    let best = { cost: Infinity, pick: {} };
+    const walk = (i, used, pick, cost) => {
+      if (cost >= best.cost) return;
+      if (i === roles.length) {
+        // 左右の並び（新郎が左・新婦が右など）が前回／hotspots と逆になる割り当ては強く避ける
+        const ps = roles.filter(r => pick[r]);
+        for (let a = 0; a < ps.length; a++) for (let b = a + 1; b < ps.length; b++) {
+          const ra = this.tracks[ps[a]] || this.priors[ps[a]], rb = this.tracks[ps[b]] || this.priors[ps[b]];
+          const before = Math.sign(CoupleTracker.center(ra).x - CoupleTracker.center(rb).x);
+          const after = Math.sign(CoupleTracker.center(pick[ps[a]]).x - CoupleTracker.center(pick[ps[b]]).x);
+          if (before && after && before !== after) cost += .5;
+        }
+        if (cost < best.cost) best = { cost, pick: { ...pick } };
+        return;
+      }
+      const r = roles[i];
+      walk(i + 1, used, pick, cost + .35);               // 割り当てなし（見失い）のコスト
+      dets.forEach((d, k) => {
+        if (used.has(k)) return;
+        const c = this.cost(r, d);
+        if (!isFinite(c)) return;
+        used.add(k); pick[r] = d;
+        walk(i + 1, used, pick, cost + c);
+        used.delete(k); delete pick[r];
+      });
+    };
+    walk(0, new Set(), {}, 0);
+    for (const r of roles) {
+      const d = best.pick[r], t = this.tracks[r];
+      if (d) {
+        const f = t ? this.o.smooth : 1;
+        this.tracks[r] = {
+          x: lerp(t?.x ?? d.x, d.x, f), y: lerp(t?.y ?? d.y, d.y, f),
+          w: lerp(t?.w ?? d.w, d.w, f), h: lerp(t?.h ?? d.h, d.h, f),
+          seen: now, hits: (t?.hits || 0) + 1
+        };
+      } else if (t && now - t.seen > this.o.holdMs) delete this.tracks[r];
+    }
+    return best.pick;
+  }
+  rect(role) {
+    const t = this.tracks[role];
+    if (!t || t.hits < 2) return null;  // 2回続けて見つかるまでは採用しない
+    const px = t.w * .1, py = t.h * .04;
+    return { x: t.x - px, y: t.y - py, w: t.w + px * 2, h: t.h + py * 2 };
+  }
+}
+/* TRACKER-END */
+
 const AI = {
-  state: 'off', detector: null, last: 0, tracks: {}, boxes: [], probe: null,
+  state: 'off', detector: null, last: 0, boxes: [], probe: null, tracker: null, sceneId: null,
   needed(src) { return src.live && src.sc.hotspots.some(h => h.auto); },
   async ensure() {
     if (this.state !== 'off') return;
@@ -1091,11 +1174,20 @@ const AI = {
     try {
       const vision = await import(`${MP_BASE}/vision_bundle.mjs`);
       const files = await vision.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-      const opts = d => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate: d }, runningMode: 'VIDEO', scoreThreshold: .3, maxResults: 6, categoryAllowlist: ['person'] });
+      const opts = d => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate: d }, runningMode: 'VIDEO', scoreThreshold: .3, maxResults: 8, categoryAllowlist: ['person'] });
       try { this.detector = await vision.ObjectDetector.createFromOptions(files, opts('GPU')); }
       catch { this.detector = await vision.ObjectDetector.createFromOptions(files, opts('CPU')); }
       this.state = 'ready';
     } catch (e) { console.warn('AI tracking unavailable:', e); this.state = 'error'; }
+  },
+  trackerFor(sc) {
+    if (this.sceneId !== sc.id) {
+      const priors = {};
+      sc.hotspots.forEach(h => { if (h.auto) priors[h.auto] = { x: h.x, y: h.y, w: h.w, h: h.h }; });
+      this.tracker = new CoupleTracker(priors);
+      this.sceneId = sc.id;
+    }
+    return this.tracker;
   },
   onFrame(src) {
     if (src.idx !== Stage.index || Router.view !== 'home' || !this.needed(src)) return;
@@ -1110,41 +1202,24 @@ const AI = {
     const boxes = res.detections.filter(d => d.boundingBox).map(d => ({
       x: d.boundingBox.originX / W, y: d.boundingBox.originY / H, w: d.boundingBox.width / W, h: d.boundingBox.height / H,
       score: d.categories[0]?.score || 0
-    })).sort((a, b) => b.w * b.h - a.w * a.h).slice(0, 2);
-    this.boxes = boxes;
-    if (!boxes.length) return;
-    // 体の下半分の明るさ（白いドレス）で新婦を判定
+    }));
+    // 体の下半分の明るさ（白いドレスの手がかり）
     if (!this.probe) { this.probe = mk('canvas'); this.probe.width = 96; this.probe.height = 54; this.pctx = this.probe.getContext('2d', { willReadFrequently: true }); }
     this.pctx.drawImage(v, 0, 0, 96, 54);
     const px = this.pctx.getImageData(0, 0, 96, 54).data;
     for (const b of boxes) {
       let sum = 0, n = 0;
-      const x0 = Math.floor(b.x * 96), x1 = Math.ceil((b.x + b.w) * 96), y0 = Math.floor((b.y + b.h * .45) * 54), y1 = Math.ceil((b.y + b.h) * 54);
+      const x0 = Math.floor((b.x + b.w * .2) * 96), x1 = Math.ceil((b.x + b.w * .8) * 96), y0 = Math.floor((b.y + b.h * .5) * 54), y1 = Math.ceil((b.y + b.h * .95) * 54);
       for (let y = Math.max(0, y0); y < Math.min(54, y1); y++) for (let x = Math.max(0, x0); x < Math.min(96, x1); x++) {
         const i = (y * 96 + x) * 4; sum += .299 * px[i] + .587 * px[i + 1] + .114 * px[i + 2]; n++;
       }
-      b.lum = n ? sum / n / 255 : 0;
+      b.lum = n ? sum / n / 255 : null;
     }
-    let roles = {};
-    if (boxes.length === 2) {
-      const [b0, b1] = boxes[0].lum >= boxes[1].lum ? [boxes[0], boxes[1]] : [boxes[1], boxes[0]];
-      roles = { bride: b0, groom: b1 };
-    } else {
-      const b = boxes[0], dist = r => this.tracks[r] ? Math.hypot(this.tracks[r].x - b.x, this.tracks[r].y - b.y) : Infinity;
-      const known = isFinite(dist('bride')) || isFinite(dist('groom'));
-      roles[known ? (dist('bride') < dist('groom') ? 'bride' : 'groom') : (b.lum > .6 ? 'bride' : 'groom')] = b;
-    }
-    for (const [role, b] of Object.entries(roles)) {
-      const p = this.tracks[role], f = p ? .4 : 1;
-      this.tracks[role] = { x: lerp(p?.x ?? b.x, b.x, f), y: lerp(p?.y ?? b.y, b.y, f), w: lerp(p?.w ?? b.w, b.w, f), h: lerp(p?.h ?? b.h, b.h, f), seen: now };
-    }
+    const pick = this.trackerFor(src.sc).update(boxes, now);
+    boxes.forEach(b => { b.role = Object.keys(pick).find(r => pick[r] === b) || null; });
+    this.boxes = boxes;
   },
-  rect(role) {
-    const t = this.tracks[role];
-    if (!t || performance.now() - t.seen > 1500) return null;
-    const px = t.w * .1, py = t.h * .04;
-    return { x: t.x - px, y: t.y - py, w: t.w + px * 2, h: t.h + py * 2 };
-  }
+  rect(role) { return this.tracker ? this.tracker.rect(role) : null; }
 };
 
 /* =====================================================================
@@ -1315,7 +1390,7 @@ const Stage = {
   /* 現在のクリック範囲（動画内の 0〜1 の位置） */
   rectNow(hs) {
     const src = this.sources[this.index];
-    if (hs.auto && src.live) { const r = AI.rect(hs.auto); if (r) return r; }
+    if (hs.auto && hs._d) return hs._d;
     const k = hs.track, time = src.time;
     if (k?.length && time != null) {
       if (time <= k[0].t) return k[0];
@@ -1388,6 +1463,14 @@ const Stage = {
   },
   tick(now) {
     if (Router.view !== 'home' || !this.W) return;
+    // AI追従の位置は毎フレーム少しずつ近づけて、ガタつきを抑える
+    const src = this.sources[this.index];
+    for (const hs of SCENES[this.index].hotspots) {
+      if (!hs.auto) continue;
+      const target = (src.live && AI.rect(hs.auto)) || { x: hs.x, y: hs.y, w: hs.w, h: hs.h };
+      if (!hs._d) hs._d = { ...target };
+      else for (const k of ['x', 'y', 'w', 'h']) hs._d[k] = lerp(hs._d[k], target[k], .12);
+    }
     this.render(now);
     if (!this.T.active) this.placeButtons();
     if (!this.narrow && !this.T.active && (this.peekDirty || this.frameN % 8 === 0)) {
@@ -1409,7 +1492,8 @@ const Stage = {
     const layer = $('#hotLayer');
     layer.querySelectorAll('.ai-box').forEach(e => e.remove());
     AI.boxes.forEach(b => {
-      const d = mk('div', { class: 'ai-box' }, `person ${(b.score * 100 | 0)}%`);
+      const d = mk('div', { class: 'ai-box' }, `${b.role ? (b.role === 'bride' ? '新婦' : '新郎') : 'person'} ${(b.score * 100 | 0)}%${b.lum != null ? ' L' + b.lum.toFixed(2) : ''}`);
+      if (!b.role) d.style.opacity = .45;
       Object.assign(d.style, { left: b.x * 100 + '%', top: b.y * 100 + '%', width: b.w * 100 + '%', height: b.h * 100 + '%' });
       layer.append(d);
     });
