@@ -6,6 +6,7 @@
     pip install pillow pillow-heif          # 初回のみ（pillow-heif は iPhone の HEIC 写真用）
     python tools/prepare_media.py           # raw/ → media/
     python tools/prepare_media.py --only ceremony bride   # 一部のフォルダだけ作り直す
+    python tools/prepare_media.py --incremental           # 前回から変わったフォルダだけ作り直す（GitHub Actions 用）
 
   raw/ の置き方:
     raw/scenes/chapel.mp4  city.mp4  beach.mp4     … TOP の3本の動画（名前は index.html の SCENES の id）
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import re
@@ -50,6 +52,7 @@ except ImportError:
 
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif", ".tif", ".tiff"}
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".3gp", ".mts"}
+TOOL_VERSION = 2  # 変換方法を変えたら上げる（--incremental でも全部作り直される）
 GENERATED = re.compile(r"^(\d{2,4}|profile)(-\d+)?\.(jpg|webp|avif|mp4)$")
 
 
@@ -181,6 +184,22 @@ def clean_generated(folder: Path) -> None:
                 f.unlink()
 
 
+def fingerprint(files: list[Path], settings: dict) -> str:
+    """フォルダの中身（ファイル名・内容）と変換設定から指紋を作る。変わっていなければ作り直さない。"""
+    h = hashlib.sha256(json.dumps({"v": TOOL_VERSION, **settings}, sort_keys=True).encode())
+    for f in sorted(files, key=lambda p: p.name):
+        h.update(f.name.encode() + b"\0")
+        with open(f, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()[:20]
+
+
+def remove_scene_files(out_dir: Path, sid: str) -> None:
+    for name in (f"{sid}.mp4", f"{sid}.av1.mp4", f"{sid}.jpg"):
+        (out_dir / name).unlink(missing_ok=True)
+
+
 def mb(path: Path) -> str:
     total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) if path.exists() else 0
     return f"{total / 1024 / 1024:.1f}MB"
@@ -192,10 +211,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="写真・動画を Web 公開用に変換します")
     ap.add_argument("--raw", default="raw", help="元の写真・動画のフォルダ（既定: raw）")
     ap.add_argument("--site", default=".", help="index.html があるフォルダ（既定: カレント）")
-    ap.add_argument("--sizes", default="640,1280,2048", help="書き出す横幅（既定: 640,1280,2048）")
+    ap.add_argument("--sizes", default="640,1600", help="書き出す横幅（既定: 640,1600）")
+    ap.add_argument("--formats", default="avif,webp",
+                    help="写真の形式（既定: avif,webp。古いブラウザにも対応するなら avif,webp,jpg）")
     ap.add_argument("--only", nargs="*", help="指定したフォルダだけ作り直す（例: --only ceremony scenes）")
     ap.add_argument("--av1", action="store_true", help="TOP の動画を AV1 でも書き出す（対応ブラウザでより軽くなる）")
     ap.add_argument("--no-video", action="store_true", help="動画の変換を省略する")
+    ap.add_argument("--incremental", action="store_true", help="前回から変わっていないフォルダは作り直さない")
     a = ap.parse_args()
 
     ROOT = Path(a.site).resolve()
@@ -204,9 +226,13 @@ def main() -> None:
     if not raw.is_dir():
         sys.exit(f"{raw} がありません。README.md を見て raw/ フォルダを作ってください。")
     sizes = [int(s) for s in a.sizes.split(",")]
-    formats = ["avif", "webp", "jpg"] if features.check("avif") else ["webp", "jpg"]
-    if "avif" not in formats:
-        log("※ この Pillow は AVIF に未対応のため WebP/JPEG のみ作ります（pip install -U pillow で対応版になります）")
+    formats = [f.strip().lower().replace("jpeg", "jpg") for f in a.formats.split(",") if f.strip()]
+    formats = [f for f in ("avif", "webp", "jpg") if f in formats] or ["webp"]
+    if "avif" in formats and not features.check("avif"):
+        formats.remove("avif")
+        if not formats:
+            formats = ["webp"]
+        log("※ この Pillow は AVIF に未対応のため省略します（pip install -U pillow で対応版になります）")
     can_video = bool(shutil.which("ffmpeg") and shutil.which("ffprobe")) and not a.no_video
     if not can_video and not a.no_video:
         log("※ ffmpeg が見つからないため動画は変換しません（写真のみ処理します）")
@@ -219,10 +245,30 @@ def main() -> None:
     manifest.setdefault("galleries", {})
     manifest.setdefault("portraits", {})
     manifest.setdefault("scenes", {})
+    fps = manifest.setdefault("fingerprints", {})
 
     folders = sorted(p for p in raw.iterdir() if p.is_dir() and not p.name.startswith("."))
     if a.only:
         folders = [p for p in folders if p.name in a.only]
+    else:
+        # raw/ から消えたフォルダ・動画は、media/ と manifest からも消す
+        names = {p.name for p in folders}
+        for name in list(manifest["galleries"]) + list(manifest["portraits"]):
+            if name not in names:
+                manifest["galleries"].pop(name, None)
+                manifest["portraits"].pop(name, None)
+                fps.pop(name, None)
+                shutil.rmtree(media / "photos" / name, ignore_errors=True)
+                shutil.rmtree(media / "videos" / name, ignore_errors=True)
+                log(f"[{name}] raw/ に無いため削除しました")
+        scene_dir = raw / "scenes"
+        stems = {f.stem for f in scene_dir.iterdir() if f.suffix.lower() in VIDEO_EXT} if scene_dir.is_dir() else set()
+        for sid in list(manifest["scenes"]):
+            if sid not in stems:
+                manifest["scenes"].pop(sid)
+                fps.pop(f"scene:{sid}", None)
+                remove_scene_files(media / "videos", sid)
+                log(f"[scene] {sid} は raw/scenes/ に無いため削除しました")
 
     for folder in folders:
         name = folder.name
@@ -237,13 +283,25 @@ def main() -> None:
             for f in sorted(files):
                 if f.suffix.lower() not in VIDEO_EXT:
                     continue
+                fp = fingerprint([f], {"scene": True, "av1": av1})
+                key = f"scene:{f.stem}"
+                if a.incremental and fps.get(key) == fp and f.stem in manifest["scenes"] and (out_dir / f"{f.stem}.mp4").exists():
+                    log(f"[scene] {f.name} 変更なし（スキップ）")
+                    continue
                 log(f"[scene] {f.name} → media/videos/{f.stem}.mp4")
+                remove_scene_files(out_dir, f.stem)
                 manifest["scenes"][f.stem] = convert_scene(f, out_dir, f.stem, av1)
+                fps[key] = fp
             continue
 
         # ---- ギャラリー
-        log(f"[{name}]")
         photo_dir, video_dir = media / "photos" / name, media / "videos" / name
+        fp = fingerprint(files, {"sizes": sizes, "formats": formats, "video": can_video, "heif": HEIF})
+        if a.incremental and fps.get(name) == fp and name in manifest["galleries"] and photo_dir.exists():
+            log(f"[{name}] 変更なし（スキップ）")
+            continue
+        log(f"[{name}]")
+        manifest["portraits"].pop(name, None)
         clean_generated(photo_dir)
         clean_generated(video_dir)
         photo_dir.mkdir(parents=True, exist_ok=True)
@@ -287,6 +345,7 @@ def main() -> None:
                 except Exception as e:
                     log(f"    ! 読み込めませんでした: {e}")
         manifest["galleries"][name] = items
+        fps[name] = fp
 
     # ---- OGP 画像（1200×630）
     ogp_src = next((p for p in raw.glob("ogp.*") if p.suffix.lower() in PHOTO_EXT), None)
@@ -311,11 +370,21 @@ def main() -> None:
     log("")
     log(f"完了：media/ の合計 {mb(media)}")
     all_files = [f for f in media.rglob("*") if f.is_file()]
+    photo_bytes = sum(f.stat().st_size for f in (media / "photos").rglob("*") if f.is_file()) if (media / "photos").exists() else 0
+    video_bytes = sum(f.stat().st_size for f in (media / "videos").rglob("*") if f.is_file()) if (media / "videos").exists() else 0
+    n_photos = sum(1 for g in manifest["galleries"].values() for it in g if it["type"] == "photo") + len(manifest["portraits"])
+    if n_photos:
+        log(f"  写真 {n_photos} 枚：{photo_bytes / 1024 / 1024:.0f}MB（1枚あたり平均 {photo_bytes / n_photos / 1024:.0f}KB）")
+    log(f"  動画：{video_bytes / 1024 / 1024:.0f}MB")
     for f in all_files:
         if f.stat().st_size > 95 * 1024 * 1024:
             log(f"  ! {rel(f)} が 95MB を超えています。GitHub は1ファイル100MBまでです。動画を短くするか分割してください")
-    if sum(f.stat().st_size for f in all_files) > 900 * 1024 * 1024:
-        log("  ! 合計が 900MB を超えています。GitHub Pages の推奨上限（1GB）に近いので、動画の見直しをおすすめします")
+    total = sum(f.stat().st_size for f in all_files)
+    if total > 1000 * 1024 * 1024:
+        log("  ! 合計が 1GB を超えています。GitHub Pages は 1GB までしか公開できません。")
+        log("    長い動画を YouTube の限定公開に移すか、--sizes 640,1280 で写真を小さくしてください")
+    elif total > 850 * 1024 * 1024:
+        log("  ! 合計が 850MB を超えています。GitHub Pages の上限（1GB）に近づいています")
     log("index.html と media/ を GitHub に置いてください（raw/ は置かないでください）。")
 
 
