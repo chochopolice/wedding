@@ -291,6 +291,19 @@ img.loaded{filter:none;transition:filter .6s}
 .site-footer .script{font-size:46px}
 .site-footer p{font-family:var(--en);font-style:italic;color:var(--ink-soft)}
 
+/* ---------- BGM ボタン ---------- */
+.bgm-btn{position:fixed;right:clamp(14px,2.5vw,28px);bottom:clamp(14px,2.5vw,28px);z-index:60;width:48px;height:48px;border-radius:50%;background:color-mix(in srgb,var(--white) 92%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid var(--champagne-soft);box-shadow:0 8px 24px -12px rgba(60,45,20,.45);display:grid;place-items:center;color:var(--champagne);transition:background .3s,border-color .3s,transform .3s var(--ease)}
+.bgm-btn:hover{transform:translateY(-2px);border-color:var(--champagne)}
+.bgm-btn svg{width:20px;height:20px}
+.bgm-btn .bars{display:none;gap:3px;align-items:flex-end;height:16px}
+.bgm-btn .bars i{width:3px;height:100%;background:currentColor;border-radius:2px;transform-origin:bottom;animation:bgm-bar 1s ease-in-out infinite}
+.bgm-btn .bars i:nth-child(2){animation-delay:-.4s}
+.bgm-btn .bars i:nth-child(3){animation-delay:-.7s}
+@keyframes bgm-bar{0%,100%{scale:1 .3}50%{scale:1 1}}
+.bgm-btn[aria-pressed="true"] .note{display:none}
+.bgm-btn[aria-pressed="true"] .bars{display:flex}
+.bgm-tip{position:fixed;right:calc(clamp(14px,2.5vw,28px) + 58px);bottom:calc(clamp(14px,2.5vw,28px) + 12px);z-index:60;background:rgba(255,255,255,.95);border:1px solid var(--champagne-soft);border-radius:999px;padding:3px 14px;font-size:12px;letter-spacing:.1em;color:var(--ink);box-shadow:0 6px 18px -10px rgba(0,0,0,.3);transition:opacity .6s,translate .6s;pointer-events:none}
+.bgm-tip.gone{opacity:0;translate:8px 0}
 .toast{position:fixed;left:50%;bottom:22px;translate:-50% 0;background:rgba(30,36,40,.94);color:#fff;padding:10px 18px;font-family:ui-monospace,Menlo,monospace;font-size:12px;z-index:200;border-radius:4px;max-width:92vw;white-space:pre-wrap}
 .toast[hidden]{display:none}
 .vt-ghost{position:fixed;z-index:40;pointer-events:none;background-repeat:no-repeat}
@@ -521,6 +534,24 @@ const CURSOR = 'feather';  // マウスカーソル：'feather'（羽ペン＋�
 const FEATHER_SIZE = 50;   // 羽ペンの横幅（px）。粒子の大きさもこれに合わせて変わります
 
 /* =====================================================================
+   5. BGM（右下の ♪ ボタンで再生。ブラウザの決まりで、最初は必ず閲覧者がボタンを押してから鳴ります）
+   ・曲のファイルは Google ドライブの bgm/ フォルダに chapel / city / beach という名前で置く
+     （mp3・m4a・wav など。変換ツールが音量をそろえて media/bgm/ に書き出します）
+   ・ファイルが無い曲は、ブラウザの中で雰囲気の近い音楽を自動演奏します（サンプル）
+   ・pick：どの画面でどの曲を流すか。画面の名前（シーン名・ギャラリー名）の先頭で判定します
+   ===================================================================== */
+const BGM = {
+  show: true,        // ♪ ボタンを表示する
+  volume: 0.55,      // 全体の音量（0〜1）
+  waves: true,       // ビーチでは、曲に波の音を重ねる
+  pick: {
+    chapel: ['chapel', 'ceremony', 'groom', 'bride'],   // 式場の動画、挙式・新郎・新婦のページ
+    city: ['city'],                                      // 街並みの動画、街のお店のページ
+    beach: ['beach']                                     // ビーチの動画、ビーチのページ
+  }
+};
+
+/* =====================================================================
    ここから下はプログラム本体（通常は編集不要）
    ===================================================================== */
 const MP_VERSION = '1.0.1';
@@ -531,6 +562,8 @@ const EDIT = new URLSearchParams(location.search).has('edit');
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
 const pad2 = n => String(n).padStart(2, '0');
+/* 中身が変わったら URL も変わるように ?v=… を付ける（ブラウザや配信側に古いファイルが残っていても新しいものを読む） */
+const ver = (url, v) => (v && url ? `${url}${url.includes('?') ? '&' : '?'}v=${v}` : url);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, f) => a + (b - a) * f;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -603,13 +636,13 @@ function placeholder(hue, label, cap, icon = ICON_PHOTO) {
 function photoEl(it, { sizes = '100vw', eager = false, hue = 40, label = 'Photo', cap = '', icon = ICON_PHOTO, onReady, keepEmpty = false } = {}) {
   if (it.base) {
     const pic = mk('picture');
-    const list = fmt => it.widths.map(w => `${it.base}-${w}.${fmt} ${w}w`).join(', ');
+    const list = fmt => it.widths.map(w => `${ver(`${it.base}-${w}.${fmt}`, it.v)} ${w}w`).join(', ');
     // <img> には最も互換性の高い形式（jpg があれば jpg、無ければ最後の形式）を使い、それ以外は <source> で出し分け
     const fb = it.formats.includes('jpg') ? 'jpg' : it.formats[it.formats.length - 1];
     for (const [fmt, type] of [['avif', 'image/avif'], ['webp', 'image/webp']])
       if (fmt !== fb && it.formats.includes(fmt)) pic.append(mk('source', { type, srcset: list(fmt), sizes }));
     const mid = it.widths[it.widths.length > 2 ? 1 : it.widths.length - 1];
-    const img = mk('img', { src: `${it.base}-${mid}.${fb}`, srcset: list(fb), sizes, width: it.w, height: it.h, alt: it.caption || '', loading: eager ? 'eager' : 'lazy', decoding: 'async', class: 'loading lqip', fetchpriority: eager ? 'high' : null });
+    const img = mk('img', { src: ver(`${it.base}-${mid}.${fb}`, it.v), srcset: list(fb), sizes, width: it.w, height: it.h, alt: it.caption || '', loading: eager ? 'eager' : 'lazy', decoding: 'async', class: 'loading lqip', fetchpriority: eager ? 'high' : null });
     if (it.lqip) img.style.backgroundImage = `url(${it.lqip})`;
     img.addEventListener('load', () => { img.classList.replace('loading', 'loaded'); img.style.backgroundImage = ''; onReady?.(img); }, { once: true });
     pic.append(img);
@@ -635,7 +668,7 @@ const videoIO = new IntersectionObserver(entries => entries.forEach(e => {
 }), { rootMargin: '300px' });
 function videoThumbEl(it, hue, label) {
   if (it.poster) {
-    const img = mk('img', { src: it.poster, alt: it.caption || '', loading: 'lazy', decoding: 'async', width: it.w, height: it.h });
+    const img = mk('img', { src: ver(it.poster, it.v), alt: it.caption || '', loading: 'lazy', decoding: 'async', width: it.w, height: it.h });
     it._ok = true;
     return img;
   }
@@ -644,7 +677,7 @@ function videoThumbEl(it, hue, label) {
     const v = mk('video', { muted: true, playsinline: true, preload: 'metadata' });
     v.muted = true;
     v.addEventListener('loadeddata', () => { it._ok = true; box.replaceChildren(v); v.style.cssText = 'width:100%;height:100%;object-fit:cover'; }, { once: true });
-    v.src = it.src + '#t=0.1';
+    v.src = ver(it.src, it.v) + '#t=0.1';
   };
   videoIO.observe(box);
   return box;
@@ -900,8 +933,9 @@ class Source {
     this.live = false; this.dirty = true; this.still = null; this.stillDrawn = false;
     this.mediaTime = 0; this.video = null; this.lastDraw = -1;
     const m = MANIFEST?.scenes?.[sc.id];
+    this.mv = m?.v;
     const sources = m?.sources || (sc.video ? [{ src: sc.video }] : []);
-    if (m?.poster) { const im = new Image(); im.onload = () => { this.still = im; this.stillDrawn = false; }; im.src = m.poster; }
+    if (m?.poster) { const im = new Image(); im.onload = () => { this.still = im; this.stillDrawn = false; }; im.src = ver(m.poster, m.v); }
     if (sources.length) this.setupVideo(sources);
   }
   setupVideo(list) {
@@ -909,7 +943,7 @@ class Source {
     v.muted = true;
     const usable = list.filter(s => !s.type || v.canPlayType(s.type));
     let k = 0;
-    const next = () => { if (k >= usable.length) return; v.src = usable[k++].src; };
+    const next = () => { if (k >= usable.length) return; v.src = ver(usable[k++].src, this.mv); };
     v.addEventListener('error', next);
     v.addEventListener('loadeddata', () => {
       this.live = true; this.dirty = true;
@@ -1695,8 +1729,12 @@ const LB = {
   step(d) { const n = galleryItems(this.gid).length; this.i = (this.i + d + n) % n; startVT(() => this.render(false)); },
   render(named) {
     const g = GALLERIES[this.gid], items = galleryItems(this.gid), it = items[this.i], isV = it.type === 'video';
+    Music.duck(false);  // 前の動画が再生中のまま切り替わった場合に BGM の音量を戻す
     let el;
-    if (isV && it._ok) { el = mk('video', { controls: true, playsinline: true, src: it.src, poster: it.poster }); el.autoplay = true; }
+    if (isV && it._ok) {
+      el = mk('video', { controls: true, playsinline: true, src: ver(it.src, it.v), poster: ver(it.poster, it.v) }); el.autoplay = true;
+      el.addEventListener('play', () => Music.duck(true)); el.addEventListener('pause', () => Music.duck(false)); el.addEventListener('ended', () => Music.duck(false));
+    }
     else if (!isV && (it.base || it._ok)) el = photoEl(it, { sizes: '100vw', eager: true });
     else el = placeholder(g.hue, `${isV ? 'Movie' : 'Photo'} ${pad2(this.i + 1)}`, it.src || it.base, isV ? ICON_VIDEO : ICON_PHOTO);
     if (named) el.style.viewTransitionName = 'lb';
@@ -1708,7 +1746,7 @@ const LB = {
 $('#lbClose').addEventListener('click', () => LB.close());
 $('#lbPrev').addEventListener('click', () => LB.step(-1));
 $('#lbNext').addEventListener('click', () => LB.step(1));
-LB.el.addEventListener('close', () => Feather.moveTo(document.body));
+LB.el.addEventListener('close', () => { Feather.moveTo(document.body); Music.duck(false); });
 LB.el.addEventListener('cancel', e => { e.preventDefault(); LB.close(); });
 LB.el.addEventListener('click', e => { if (e.target === LB.el) LB.close(); });
 let lbSx = null;
@@ -1966,9 +2004,273 @@ const Feather = {
   }
 };
 
+/* =====================================================================
+   BGM：場面に合わせて曲をゆっくり切り替える（Web Audio）
+   ===================================================================== */
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+function makeNoise(ctx, sec, pink = true) {
+  const len = Math.round(ctx.sampleRate * sec), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch); let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      if (!pink) { d[i] = w; continue; }
+      b0 = .99886 * b0 + w * .0555179; b1 = .99332 * b1 + w * .0750759; b2 = .969 * b2 + w * .153852;
+      b3 = .8665 * b3 + w * .3104856; b4 = .55 * b4 + w * .5329522; b5 = -.7616 * b5 - w * .016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * .5362) * .11; b6 = w * .115926;
+    }
+  }
+  return buf;
+}
+function makeReverb(ctx, sec, decay) {
+  const len = Math.round(ctx.sampleRate * sec), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); }
+  const c = ctx.createConvolver(); c.buffer = buf; return c;
+}
+/** 自動演奏の共通部分：先読みで音を予約していく */
+class SynthEngine {
+  constructor(ctx, out, level, verbSec, verbDecay, wet) {
+    this.ctx = ctx; this.out = ctx.createGain(); this.out.gain.value = level; this.out.connect(out);
+    this.dry = ctx.createGain(); this.dry.connect(this.out);
+    this.verb = makeReverb(ctx, verbSec, verbDecay); const w = ctx.createGain(); w.gain.value = wet;
+    this.dry.connect(this.verb); this.verb.connect(w); w.connect(this.out);
+    this.t = 0; this.step = 0; this.nodes = new Set();
+  }
+  osc(type, freq, t, dur, peak, a, r, dest = this.dry, detune = 0) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.value = freq; o.detune.value = detune;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a);
+    g.gain.setTargetAtTime(0, t + Math.max(a, dur), r / 3);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + r * 1.5 + 0.05);
+    return o;
+  }
+  pluckTone(freq, t, peak, decay, type = 'sine', dest = this.dry) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t + decay + 0.05);
+  }
+  start(t0) { this.t = t0; }
+  scheduleUntil(tEnd) { while (this.t < tEnd) this.t += this.tick(this.t, this.step++); }
+  live() { this.timer = setInterval(() => this.scheduleUntil(this.ctx.currentTime + 1.5), 250); this.scheduleUntil(this.ctx.currentTime + 1.5); }
+  fadeTo(v, sec) { const g = this.out.gain, now = this.ctx.currentTime; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(v, now + sec); }
+  stop(sec = 2.5) { this.fadeTo(0, sec); clearInterval(this.timer); setTimeout(() => this.out.disconnect(), sec * 1000 + 3000); }
+}
+/** チャペル：オルガン風の和音と鐘のような旋律、長い残響 */
+class ChapelEngine extends SynthEngine {
+  constructor(ctx, out) {
+    super(ctx, out, 0.9, 4.2, 2.6, 0.55);
+    this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 2400; this.lp.connect(this.dry);
+    this.prog = [[41, 53, 57, 60, 65], [40, 52, 55, 60, 64], [38, 50, 57, 62, 65], [45, 52, 57, 60, 64], [46, 50, 58, 62, 65], [45, 53, 57, 60, 65], [43, 50, 55, 58, 62], [48, 52, 55, 60, 64]];
+  }
+  tick(t, i) {
+    const ch = this.prog[i % this.prog.length], len = 4.8;
+    ch.forEach((m, k) => {
+      const f = mtof(m), lvl = k === 0 ? 0.07 : 0.045;
+      this.osc('sine', f, t, len, lvl, 0.9, 1.6, this.lp, -3);
+      this.osc('sine', f * 2, t, len, lvl * 0.45, 0.9, 1.6, this.lp, 3);
+      if (k) this.osc('triangle', f * 4, t, len, lvl * 0.08, 1.1, 1.4, this.lp);
+    });
+    const top = ch.slice(2).map(m => m + 12);
+    [0.6, 2.0, 3.4].forEach((dt, j) => {
+      if (Math.random() < (j === 0 ? 0.9 : 0.6)) {
+        const f = mtof(top[(i + j * 2) % top.length]);
+        [[1, 0.09, 2.6], [2.756, 0.035, 1.3], [5.404, 0.015, 0.7]].forEach(([r, a, d]) => this.pluckTone(f * r, t + dt, a, d));
+      }
+    });
+    return len;
+  }
+}
+/** 街並み：ウクレレ風のストローク、マリンバ、ベース、シェイカー */
+class TropicalEngine extends SynthEngine {
+  constructor(ctx, out) {
+    super(ctx, out, 2.3, 1.4, 3, 0.18);
+    this.noise = makeNoise(ctx, 1, false);
+    this.prog = [[[67, 60, 64, 72], 48], [[69, 60, 64, 69], 45], [[69, 60, 65, 69], 41], [[67, 62, 67, 71], 43]];
+    this.penta = [72, 74, 76, 79, 81, 84, 86]; this.mel = 2;
+  }
+  uke(m, t, vel) {
+    const c = this.ctx, f = mtof(m), lp = c.createBiquadFilter(), g = c.createGain();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(700, t + 0.25);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05 * vel, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+    lp.connect(g); g.connect(this.dry);
+    for (const [type, mul, det] of [['triangle', 1, 0], ['sawtooth', 0.35, 6]]) {
+      const o = c.createOscillator(), og = c.createGain(); o.type = type; o.frequency.value = f; o.detune.value = det; og.gain.value = mul;
+      o.connect(og); og.connect(lp); o.start(t); o.stop(t + 0.75);
+    }
+  }
+  shaker(t, vel) {
+    const c = this.ctx, s = c.createBufferSource(), hp = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noise; hp.type = 'highpass'; hp.frequency.value = 6500;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.035 * vel, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    s.connect(hp); hp.connect(g); g.connect(this.dry); s.start(t, Math.random() * 0.8); s.stop(t + 0.09);
+  }
+  tick(t, i) {
+    const e = 60 / 104 / 2, bar = this.prog[Math.floor(i / 8) % 4], k = i % 8;
+    const [chord, root] = bar;
+    const hits = { 0: 'd', 2: 'd', 3: 'u', 5: 'u', 6: 'd', 7: 'u' };
+    if (hits[k]) {
+      const order = hits[k] === 'd' ? chord : [...chord].reverse(), vel = hits[k] === 'd' ? 1 : 0.7;
+      order.forEach((m, j) => this.uke(m, t + j * 0.012, vel));
+    }
+    if (k === 0 || k === 4) this.pluckTone(mtof(root + 12), t, 0.12, 0.5, 'triangle');
+    this.shaker(t, k % 2 ? 1 : 0.55);
+    if (Math.random() < (k % 2 ? 0.22 : 0.4)) {
+      this.mel = clamp(this.mel + Math.round((Math.random() - 0.5) * 3), 0, this.penta.length - 1);
+      const f = mtof(this.penta[this.mel]);
+      this.pluckTone(f, t, 0.07, 0.45); this.pluckTone(f * 4, t, 0.012, 0.12);
+    }
+    return e;
+  }
+}
+/** ビーチ：寄せては返す波の音（曲ファイルがあっても重ねる） */
+class WavesEngine extends SynthEngine {
+  constructor(ctx, out) {
+    super(ctx, out, 1, 0.5, 2, 0);
+    this.noise = makeNoise(ctx, 6, true);
+  }
+  start(t0) {
+    super.start(t0);
+    const c = this.ctx, s = c.createBufferSource(), lp = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noise; s.loop = true; lp.type = 'lowpass'; lp.frequency.value = 320; g.gain.value = 0.22;
+    s.connect(lp); lp.connect(g); g.connect(this.dry); s.start(t0);
+  }
+  tick(t) {
+    const c = this.ctx, s = c.createBufferSource(), lp = c.createBiquadFilter(), g = c.createGain();
+    const peak = 0.55 + Math.random() * 0.35, hi = 1100 + Math.random() * 1100, len = 8 + Math.random() * 4;
+    s.buffer = this.noise; s.loop = true; lp.type = 'lowpass'; lp.Q.value = 0.4;
+    lp.frequency.setValueAtTime(280, t); lp.frequency.linearRampToValueAtTime(hi, t + 3); lp.frequency.exponentialRampToValueAtTime(380, t + len);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 2.8); g.gain.linearRampToValueAtTime(peak * 0.35, t + 4.6); g.gain.linearRampToValueAtTime(0, t + len);
+    s.connect(lp); lp.connect(g); g.connect(this.dry); s.start(t, Math.random() * 5); s.stop(t + len + 0.1);
+    return 6 + Math.random() * 4;
+  }
+}
+/** ビーチ：しっとりしたエレクトリックピアノの和音とゆっくりした旋律 */
+class MellowEngine extends SynthEngine {
+  constructor(ctx, out) {
+    super(ctx, out, 0.85, 3.2, 2.4, 0.45);
+    this.prog = [[41, 53, 57, 60, 64], [40, 52, 55, 59, 62], [38, 50, 53, 57, 60], [36, 48, 52, 55, 59]];
+    this.penta = [77, 79, 81, 84, 86, 89];
+  }
+  ep(m, t, vel, dur = 3.5) {
+    const f = mtof(m);
+    this.pluckTone(f, t, 0.06 * vel, dur);
+    this.pluckTone(f * 2, t, 0.012 * vel, dur * 0.4);
+    this.pluckTone(f * 7, t, 0.004 * vel, 0.25);
+  }
+  tick(t, i) {
+    const ch = this.prog[i % this.prog.length], len = 7.5;
+    this.ep(ch[0] + 12, t, 1.1, 6);
+    ch.slice(1).forEach((m, j) => this.ep(m, t + 0.35 + j * 0.42, 0.9));
+    ch.slice(1).forEach(m => this.ep(m, t + 3.75, 0.55, 3));
+    [2.3, 5.2, 6.4].forEach(dt => { if (Math.random() < 0.55) this.ep(this.penta[Math.floor(Math.random() * this.penta.length)], t + dt, 0.75, 2.6); });
+    return len;
+  }
+}
+/** 曲ファイル（ドライブの bgm/ から変換したもの） */
+class FileEngine {
+  constructor(ctx, out, item) {
+    this.ctx = ctx; this.el = new Audio(ver(item.src, item.v)); this.el.loop = true; this.el.preload = 'auto'; this.el.crossOrigin = 'anonymous';
+    this.out = ctx.createGain(); this.out.gain.value = 0; this.out.connect(out);
+    ctx.createMediaElementSource(this.el).connect(this.out);
+  }
+  start() {}
+  live() { this.el.play().catch(() => {}); }
+  fadeTo(v, sec) { const g = this.out.gain, now = this.ctx.currentTime; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(v, now + sec); }
+  stop(sec = 2.5) { this.fadeTo(0, sec); setTimeout(() => { this.el.pause(); this.out.disconnect(); }, sec * 1000 + 200); }
+}
+const SYNTH = { chapel: [ChapelEngine], city: [TropicalEngine], beach: [MellowEngine, WavesEngine] };
+
+const Music = {
+  ctx: null, on: false, cur: null, layers: [], ducked: false,
+  init() {
+    if (!BGM.show) return;
+    this.btn = mk('button', { class: 'bgm-btn', 'aria-pressed': 'false', 'aria-label': 'BGM を流す', html: '<svg class="note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>' });
+    this.tip = mk('div', { class: 'bgm-tip', 'aria-hidden': 'true' }, '♪ 音楽を流す');
+    document.body.append(this.tip, this.btn);
+    setTimeout(() => this.tip.classList.add('gone'), 7000);
+    this.btn.addEventListener('click', () => this.toggle());
+    let pref = null;
+    try { pref = localStorage.getItem('wedding-bgm'); } catch {}
+    if (pref === '1') {
+      // 前回 ON にしていた人は、最初の操作（クリックやキー）で自動的に再生
+      const go = () => { if (!this.on) this.toggle(true); off(); };
+      const off = () => ['pointerdown', 'keydown'].forEach(ev => removeEventListener(ev, go, true));
+      ['pointerdown', 'keydown'].forEach(ev => addEventListener(ev, go, { capture: true, once: true }));
+    }
+    document.addEventListener('visibilitychange', () => { if (!this.ctx) return; document.hidden ? this.ctx.suspend() : this.on && this.ctx.resume(); });
+    setInterval(() => this.update(), 500);
+  },
+  toggle(force) {
+    this.on = force ?? !this.on;
+    this.tip.classList.add('gone');
+    this.btn.setAttribute('aria-pressed', String(this.on));
+    this.btn.setAttribute('aria-label', this.on ? 'BGM を止める' : 'BGM を流す');
+    try { localStorage.setItem('wedding-bgm', this.on ? '1' : '0'); } catch {}
+    if (this.on) {
+      if (!this.ctx) {
+        this.ctx = new AudioContext();
+        this.comp = this.ctx.createDynamicsCompressor(); this.comp.threshold.value = -14; this.comp.ratio.value = 3;
+        this.master = this.ctx.createGain(); this.master.gain.value = 0;
+        this.comp.connect(this.master); this.master.connect(this.ctx.destination);
+      }
+      this.ctx.resume();
+      this.cur = null; this.update();
+      this.setMaster(this.ducked ? 0.08 : BGM.volume, 1.2);
+    } else if (this.ctx) {
+      this.setMaster(0, 0.8);
+      setTimeout(() => { if (!this.on) { this.layers.forEach(l => l.stop(0.1)); this.layers = []; this.cur = null; this.ctx.suspend(); } }, 900);
+    }
+  },
+  setMaster(v, sec) { const g = this.master.gain, now = this.ctx.currentTime; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(v, now + sec); },
+  /** 動画の音声を再生している間は BGM を小さくする */
+  duck(on) { this.ducked = on; if (this.ctx && this.on) this.setMaster(on ? 0.08 : BGM.volume, on ? 0.6 : 1.5); },
+  /** 今の画面に合う曲の名前 */
+  want() {
+    let key;
+    if (Router.view === 'home') key = SCENES[Stage.T.active ? Stage.T.to : Stage.index]?.id;
+    else key = (Router.key || '').split('/')[1];
+    if (!key) return null;
+    for (const [name, list] of Object.entries(BGM.pick)) if (list.some(p => key.startsWith(p))) return name;
+    return null;
+  },
+  update() {
+    if (!this.on || !this.ctx) return;
+    const name = this.want();
+    if (name === this.cur) return;
+    this.cur = name;
+    this.layers.forEach(l => l.stop(2.5));
+    this.layers = [];
+    if (!name) return;
+    const file = MANIFEST?.bgm?.[name];
+    const kinds = file ? (name === 'beach' && BGM.waves ? ['file', WavesEngine] : ['file']) : SYNTH[name];
+    for (const K of kinds) {
+      const eng = K === 'file' ? new FileEngine(this.ctx, this.comp, file) : new K(this.ctx, this.comp);
+      const level = eng.out.gain.value || 1;
+      eng.out.gain.value = 0;
+      eng.start(this.ctx.currentTime + 0.05); eng.live(); eng.fadeTo(level, 3);
+      this.layers.push(eng);
+    }
+  },
+  /** 確認用：自動演奏を数秒ぶん書き出す（WAV の base64） */
+  async render(name, sec = 20) {
+    const oc = new OfflineAudioContext(2, 44100 * sec, 44100), comp = oc.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.ratio.value = 3; const m = oc.createGain(); m.gain.value = BGM.volume; comp.connect(m); m.connect(oc.destination);
+    for (const K of SYNTH[name]) { const e = new K(oc, comp); e.start(0.05); e.scheduleUntil(sec); }
+    const buf = await oc.startRendering(), n = buf.length, L = buf.getChannelData(0), R = buf.getChannelData(1);
+    const dv = new DataView(new ArrayBuffer(44 + n * 4)), w = (o, str) => [...str].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); w(8, 'WAVEfmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+    dv.setUint32(24, 44100, true); dv.setUint32(28, 44100 * 4, true); dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, n * 4, true);
+    for (let i = 0; i < n; i++) { dv.setInt16(44 + i * 4, clamp(L[i], -1, 1) * 32767, true); dv.setInt16(46 + i * 4, clamp(R[i], -1, 1) * 32767, true); }
+    const bytes = new Uint8Array(dv.buffer); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+};
+
 /* ---------- init ---------- */
 Stage.build();
 Feather.init();
+Music.init();
 buildHome();
 addEventListener('hashchange', () => Router.route());
 document.addEventListener('visibilitychange', () => Stage.syncPlayback());
@@ -1986,7 +2288,7 @@ document.addEventListener('keydown', e => {
 Router.route();
 const loop = now => { Stage.tick(now); requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
-window.__wedding = { Stage, AI, Router, LB, Feather };
+window.__wedding = { Stage, AI, Router, LB, Feather, Music };
 </script>
 </body>
 </html>
