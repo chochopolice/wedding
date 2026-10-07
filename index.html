@@ -593,12 +593,10 @@ function photoEl(it, { sizes = '100vw', eager = false, hue = 40, label = 'Photo'
   if (it.base) {
     const pic = mk('picture');
     const list = fmt => it.widths.map(w => `${it.base}-${w}.${fmt} ${w}w`).join(', ');
-    // <img> には最も互換性の高い形式（jpg があれば jpg、無ければ最後の形式）を使い、それ以外は <source> で出し分け
-    const fb = it.formats.includes('jpg') ? 'jpg' : it.formats[it.formats.length - 1];
     for (const [fmt, type] of [['avif', 'image/avif'], ['webp', 'image/webp']])
-      if (fmt !== fb && it.formats.includes(fmt)) pic.append(mk('source', { type, srcset: list(fmt), sizes }));
-    const mid = it.widths[it.widths.length > 2 ? 1 : it.widths.length - 1];
-    const img = mk('img', { src: `${it.base}-${mid}.${fb}`, srcset: list(fb), sizes, width: it.w, height: it.h, alt: it.caption || '', loading: eager ? 'eager' : 'lazy', decoding: 'async', class: 'loading lqip', fetchpriority: eager ? 'high' : null });
+      if (it.formats.includes(fmt)) pic.append(mk('source', { type, srcset: list(fmt), sizes }));
+    const mid = it.widths[Math.min(1, it.widths.length - 1)];
+    const img = mk('img', { src: `${it.base}-${mid}.jpg`, srcset: list('jpg'), sizes, width: it.w, height: it.h, alt: it.caption || '', loading: eager ? 'eager' : 'lazy', decoding: 'async', class: 'loading lqip', fetchpriority: eager ? 'high' : null });
     if (it.lqip) img.style.backgroundImage = `url(${it.lqip})`;
     img.addEventListener('load', () => { img.classList.replace('loading', 'loaded'); img.style.backgroundImage = ''; onReady?.(img); }, { once: true });
     pic.append(img);
