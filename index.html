@@ -315,6 +315,15 @@ img.loaded{filter:none;transition:filter .6s}
   @keyframes stage-away{to{scale:.94;opacity:.35}}
 }
 
+/* ---------- 羽ペンのカーソル ---------- */
+html.feather-on, html.feather-on *, html.feather-on *::before, html.feather-on *::after{cursor:none !important}
+html.feather-on dialog::backdrop{cursor:none}
+.feather-fx{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483000;view-transition-name:feather-fx}
+.feather-pen{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483001;will-change:transform;user-select:none;-webkit-user-drag:none;transition:opacity .25s;view-transition-name:feather-pen;filter:drop-shadow(0 2px 3px rgba(90,60,10,.35))}
+.feather-pen.hidden{opacity:0}
+::view-transition-group(feather-fx),::view-transition-group(feather-pen){animation:none}
+::view-transition-old(feather-fx),::view-transition-old(feather-pen){display:none}
+
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
@@ -506,8 +515,10 @@ const SCENES = [
   }
 ];
 const START_SCENE = 1; // 最初に表示するシーン（0=街, 1=式場, 2=ビーチ）
-const PINS = 'small';  // 動画の上のクリックできる場所の白い目印：'normal'（通常）／'small'（極小）／'none'（表示しない）
+const PINS = 'none';   // 動画の上のクリックできる場所の白い目印：'normal'（通常）／'small'（極小）／'none'（表示しない）
 document.body.dataset.pins = PINS;
+const CURSOR = 'feather';  // マウスカーソル：'feather'（羽ペン＋追いかける金の粒子）／'default'（通常のカーソル）
+const FEATHER_SIZE = 50;   // 羽ペンの横幅（px）。粒子の大きさもこれに合わせて変わります
 
 /* =====================================================================
    ここから下はプログラム本体（通常は編集不要）
@@ -1664,7 +1675,7 @@ const LB = {
     if (fromEl) fromEl.style.viewTransitionName = 'lb';
     const vt = startVT(() => {
       if (fromEl) fromEl.style.viewTransitionName = '';
-      this.el.showModal(); this.render(true);
+      this.el.showModal(); Feather.moveTo(this.el); this.render(true);
     });
     const clear = () => { if (this.mediaEl) this.mediaEl.style.viewTransitionName = ''; };
     vt ? vt.finished.finally(clear) : clear();
@@ -1697,6 +1708,7 @@ const LB = {
 $('#lbClose').addEventListener('click', () => LB.close());
 $('#lbPrev').addEventListener('click', () => LB.step(-1));
 $('#lbNext').addEventListener('click', () => LB.step(1));
+LB.el.addEventListener('close', () => Feather.moveTo(document.body));
 LB.el.addEventListener('cancel', e => { e.preventDefault(); LB.close(); });
 LB.el.addEventListener('click', e => { if (e.target === LB.el) LB.close(); });
 let lbSx = null;
@@ -1768,8 +1780,195 @@ const Router = {
   }
 };
 
+/* =====================================================================
+   羽ペンのカーソル
+   ・ペン先がクリック位置。羽ペンはカーソルにぴったり付いて動き、動きに合わせて少し傾く
+   ・周りの金の粒子はそれぞれ違う速さで遅れて追いかける（速く動かすと尾を引く）
+   ・動かすと粒子がこぼれ、クリックするとペン先から粒子がはじける
+   ・マウスのある端末だけで有効。タッチ端末・動きを減らす設定・?edit では通常のカーソル
+   ===================================================================== */
+const FEATHER_IMG = 'data:image/webp;base64,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';
+const Feather = {
+  on: false, host: null, W: 0, H: 0, dpr: 1,
+  // 画像の中のペン先の位置（割合）と、羽の向き（ペン先 → 羽の先）
+  tip: { x: 0.0056, y: 0.992 },
+  init() {
+    if (CURSOR !== 'feather' || EDIT || REDUCED) return;
+    const mq = matchMedia('(hover: hover) and (pointer: fine)');
+    const apply = () => (mq.matches ? this.enable() : this.disable());
+    mq.addEventListener('change', apply);
+    apply();
+  },
+  enable() {
+    if (this.on) return;
+    this.on = true;
+    const S = FEATHER_SIZE, H = S * 151 / 192;
+    this.size = { w: S, h: H };
+    this.k = S / 64;                                     // 粒子の大きさの倍率
+    this.len = Math.hypot(S, H);
+    this.base = Math.atan2(-H, S);                       // 羽の軸の向き（約 -38°）
+    this.cv = mk('canvas', { class: 'feather-fx', 'aria-hidden': 'true' });
+    this.ctx = this.cv.getContext('2d');
+    this.pen = mk('img', { class: 'feather-pen hidden', src: FEATHER_IMG, alt: '', 'aria-hidden': 'true', draggable: 'false', width: S, height: Math.round(H) });
+    this.pen.style.transformOrigin = `${this.tip.x * 100}% ${this.tip.y * 100}%`;
+    this.moveTo(document.body);
+    this.sprites();
+    this.resize();
+    this.m = { x: innerWidth / 2, y: innerHeight / 2 };
+    this.v = { x: 0, y: 0 }; this.tilt = 0; this.scale = 1; this.hot = false; this.down = false; this.seen = false; this.alpha = 0;
+    this.lag = { x: this.m.x, y: this.m.y };
+    this.aura = Array.from({ length: 46 }, (_, i) => {
+      const u = 0.2 + Math.pow(Math.random(), 0.8) * 0.85, w = (Math.random() * 2 - 1) * (0.2 * Math.sin(Math.PI * Math.min(1, (u - 0.1) / 0.95)) + 0.03);
+      return { u, w, k: 0.05 + Math.random() * 0.17, ph: Math.random() * 6.283, sp: 0.6 + Math.random() * 1.6, r: 0.9 + Math.random() * 2.2, x: this.m.x, y: this.m.y, hue: Math.random() };
+    });
+    this.parts = [];
+    this.h = {
+      move: e => this.onMove(e),
+      down: e => { if (e.pointerType !== 'mouse') return; this.down = true; this.burst(); },
+      up: () => { this.down = false; },
+      out: e => { if (!e.relatedTarget) this.seen = false; },
+      blur: () => { this.seen = false; },
+      resize: () => this.resize()
+    };
+    addEventListener('pointermove', this.h.move, { passive: true });
+    addEventListener('pointerdown', this.h.down, { passive: true });
+    addEventListener('pointerup', this.h.up, { passive: true });
+    document.addEventListener('pointerout', this.h.out);
+    addEventListener('blur', this.h.blur);
+    addEventListener('resize', this.h.resize);
+    document.documentElement.classList.add('feather-on');
+    this.last = performance.now();
+    const loop = now => { if (!this.on) return; this.frame(now); this.raf = requestAnimationFrame(loop); };
+    this.raf = requestAnimationFrame(loop);
+  },
+  disable() {
+    if (!this.on) return;
+    this.on = false;
+    cancelAnimationFrame(this.raf);
+    removeEventListener('pointermove', this.h.move); removeEventListener('pointerdown', this.h.down); removeEventListener('pointerup', this.h.up);
+    document.removeEventListener('pointerout', this.h.out); removeEventListener('blur', this.h.blur); removeEventListener('resize', this.h.resize);
+    this.cv.remove(); this.pen.remove();
+    document.documentElement.classList.remove('feather-on');
+  },
+  /** 最前面（ライトボックスなど）に表示するため、置き場所を移す */
+  moveTo(parent) {
+    if (!this.cv || this.host === parent) return;
+    this.host = parent;
+    parent.append(this.cv, this.pen);
+  },
+  resize() {
+    this.dpr = Math.min(devicePixelRatio || 1, 1.5);
+    this.W = innerWidth; this.H = innerHeight;
+    this.cv.width = Math.round(this.W * this.dpr); this.cv.height = Math.round(this.H * this.dpr);
+  },
+  sprites() {
+    const glow = mk('canvas'); glow.width = glow.height = 64;
+    const g = glow.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,244,200,1)'); gr.addColorStop(0.22, 'rgba(246,200,90,.9)');
+    gr.addColorStop(0.55, 'rgba(214,156,40,.3)'); gr.addColorStop(1, 'rgba(200,140,30,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    const star = mk('canvas'); star.width = star.height = 64;
+    const c = star.getContext('2d'); c.translate(32, 32);
+    for (const [len, wd] of [[30, 2.2], [18, 1.6]]) {
+      for (let k = 0; k < (len === 30 ? 2 : 2); k++) {
+        c.save(); c.rotate(k * Math.PI / 2 + (len === 30 ? 0 : Math.PI / 4));
+        const lg = c.createLinearGradient(-len, 0, len, 0);
+        lg.addColorStop(0, 'rgba(255,230,150,0)'); lg.addColorStop(0.5, 'rgba(255,250,225,1)'); lg.addColorStop(1, 'rgba(255,230,150,0)');
+        c.fillStyle = lg; c.beginPath(); c.ellipse(0, 0, len, wd, 0, 0, Math.PI * 2); c.fill(); c.restore();
+      }
+    }
+    this.glow = glow; this.star = star;
+  },
+  onMove(e) {
+    if (e.pointerType && e.pointerType !== 'mouse') return;
+    const nx = e.clientX, ny = e.clientY;
+    if (!this.seen) { this.m = { x: nx, y: ny }; this.lag = { x: nx, y: ny }; this.aura.forEach(p => { p.x = nx; p.y = ny; }); }
+    this.v.x += (nx - this.m.x) * 0.5; this.v.y += (ny - this.m.y) * 0.5;
+    this.m = { x: nx, y: ny };
+    this.seen = true;
+    const t = e.target instanceof Element ? e.target : null;
+    this.hot = !!t?.closest('a[href],button,[role="button"],.gutter,.tile-btn,summary,label,select,input');
+  },
+  /** 羽の上の点（u：ペン先からの長さの割合、w：軸からの横ずれ）を画面の座標にする */
+  at(u, w, ox = this.m.x, oy = this.m.y) {
+    const a = this.base + this.tilt * Math.PI / 180, L = this.len * this.scale;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    return { x: ox + (ca * u - sa * w) * L, y: oy + (sa * u + ca * w) * L };
+  },
+  emit(n, opt = {}) {
+    for (let i = 0; i < n && this.parts.length < 260; i++) {
+      const p = opt.at || this.at(0.25 + Math.random() * 0.75, (Math.random() * 2 - 1) * 0.16);
+      const ang = opt.radial ? Math.random() * Math.PI * 2 : 0, spd = opt.radial ? (1.2 + Math.random() * 2.6) * this.k : 0;
+      this.parts.push({
+        x: p.x, y: p.y,
+        vx: (opt.radial ? Math.cos(ang) * spd : -this.v.x * 0.04 + (Math.random() - 0.5) * 0.6),
+        vy: (opt.radial ? Math.sin(ang) * spd : -this.v.y * 0.04 + (Math.random() - 0.5) * 0.6 - 0.15),
+        life: 0, max: 0.5 + Math.random() * 0.7, r: 0.8 + Math.random() * 2.2, star: Math.random() < 0.28, rot: Math.random() * 3
+      });
+    }
+  },
+  burst() { this.emit(22, { at: { x: this.m.x, y: this.m.y }, radial: true }); },
+  frame(now) {
+    const dt = Math.min(0.05, (now - this.last) / 1000), f = dt * 60; this.last = now;
+    const c = this.ctx, d = this.dpr;
+    // 羽ペン本体：カーソル位置にぴったり。横の速さで少し傾き、リンクの上では少し持ち上がる
+    const speed = Math.hypot(this.v.x, this.v.y);
+    const tiltT = clamp(this.v.x * 0.35, -16, 16) + (this.hot ? -10 : 0);
+    this.tilt += (tiltT - this.tilt) * Math.min(1, 0.18 * f);
+    const scT = this.down ? 0.9 : this.hot ? 1.1 : 1;
+    this.scale += (scT - this.scale) * Math.min(1, 0.25 * f);
+    this.alpha += ((this.seen ? 1 : 0) - this.alpha) * Math.min(1, 0.15 * f);
+    const { w, h } = this.size;
+    this.pen.style.transform = `translate3d(${this.m.x - this.tip.x * w}px,${this.m.y - this.tip.y * h}px,0) rotate(${this.tilt}deg) scale(${this.scale})`;
+    this.pen.classList.toggle('hidden', !this.seen);
+    // こぼれる粒子：動いた量に応じて
+    if (this.seen && speed > 1.5) this.emit(Math.min(5, Math.round(speed * 0.12 + Math.random())));
+    this.v.x *= Math.pow(0.82, f); this.v.y *= Math.pow(0.82, f);
+
+    c.setTransform(d, 0, 0, d, 0, 0);
+    c.clearRect(0, 0, this.W, this.H);
+    if (this.alpha < 0.01 && !this.parts.length) return;
+    // 羽の周りのぼかし（遅れて付いてくる光の帯）
+    this.lag.x += (this.m.x - this.lag.x) * Math.min(1, 0.12 * f);
+    this.lag.y += (this.m.y - this.lag.y) * Math.min(1, 0.12 * f);
+    const mid = this.at(0.58, 0, this.lag.x, this.lag.y), L = this.len * this.scale;
+    c.save(); c.globalAlpha = 0.28 * this.alpha * (this.hot ? 1.3 : 1);
+    c.translate(mid.x, mid.y); c.rotate(this.base + this.tilt * Math.PI / 180); c.scale(L * 0.62 / 32, L * 0.24 / 32);
+    c.drawImage(this.glow, -32, -32); c.restore();
+    // まとわりつく金の粒子：一つずつ違う速さで遅れて追いかける
+    const t = now / 1000;
+    for (const p of this.aura) {
+      const wob = Math.sin(t * p.sp + p.ph) * 0.05, wob2 = Math.cos(t * p.sp * 0.8 + p.ph) * 0.03;
+      const tg = this.at(p.u + wob2, p.w + wob);
+      const k = Math.min(1, p.k * f);
+      p.x += (tg.x - p.x) * k; p.y += (tg.y - p.y) * k;
+      const tw = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(t * p.sp * 2.2 + p.ph * 3), 2);
+      const r = p.r * (this.hot ? 1.25 : 1) * 3.2 * this.k;
+      c.globalAlpha = this.alpha * tw * 0.85;
+      c.drawImage(this.glow, p.x - r, p.y - r, r * 2, r * 2);
+    }
+    // こぼれた粒子・はじけた粒子
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const p = this.parts[i];
+      p.life += dt;
+      if (p.life >= p.max) { this.parts.splice(i, 1); continue; }
+      p.x += p.vx * f; p.y += p.vy * f; p.vx *= Math.pow(0.95, f); p.vy = p.vy * Math.pow(0.95, f) + 0.012 * f;
+      const k = 1 - p.life / p.max, r = p.r * (0.6 + 0.4 * k) * this.k;
+      c.globalAlpha = k * (p.star ? 0.95 : 0.8);
+      if (p.star) {
+        const s = r * 4.2;
+        c.save(); c.translate(p.x, p.y); c.rotate(p.rot + p.life * 2); c.drawImage(this.star, -s, -s, s * 2, s * 2); c.restore();
+      } else {
+        const s = r * 3; c.drawImage(this.glow, p.x - s, p.y - s, s * 2, s * 2);
+      }
+    }
+    c.globalAlpha = 1;
+  }
+};
+
 /* ---------- init ---------- */
 Stage.build();
+Feather.init();
 buildHome();
 addEventListener('hashchange', () => Router.route());
 document.addEventListener('visibilitychange', () => Stage.syncPlayback());
@@ -1787,7 +1986,7 @@ document.addEventListener('keydown', e => {
 Router.route();
 const loop = now => { Stage.tick(now); requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
-window.__wedding = { Stage, AI, Router, LB };
+window.__wedding = { Stage, AI, Router, LB, Feather };
 </script>
 </body>
 </html>
