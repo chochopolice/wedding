@@ -2,25 +2,26 @@
 """
 写真・動画を Web 公開用に変換して media/ と media/manifest.json を作るツール
 
-  使い方:
+  使い方（手元で使う場合）:
     pip install pillow pillow-heif          # 初回のみ（pillow-heif は iPhone の HEIC 写真用）
     python tools/prepare_media.py           # raw/ → media/
-    python tools/prepare_media.py --only ceremony bride   # 一部のフォルダだけ作り直す
-    python tools/prepare_media.py --incremental           # 前回から変わったフォルダだけ作り直す（GitHub Actions 用）
+    python tools/prepare_media.py --incremental           # 前回から変わったフォルダだけ作り直す
+
+  GitHub Actions では Google ドライブの一覧（rclone lsjson）を --listing で渡し、
+  --plan で「ダウンロードが必要なフォルダ・ファイル」だけを出力 → その分だけ取得して変換します。
+  元の写真は実行のたびに必要な分だけ取得し、実行後は残しません（キャッシュにも入れません）。
 
   raw/ の置き方:
     raw/scenes/chapel.mp4  city.mp4  beach.mp4     … TOP の3本の動画（名前は index.html の SCENES の id）
     raw/ceremony/*.jpg *.heic *.mov …              … 挙式の写真・動画（順番は撮影日時順に自動で並びます）
     raw/groom/profile.jpg                          … プロフィール写真（ファイル名を profile にする）
-    raw/groom/*.jpg …                              … 新郎の写真
     raw/city-restaurant/ など                      … index.html の GALLERIES と同じ名前のフォルダ
     raw/ogp.jpg（任意）                            … LINE などで共有したときのサムネイル元画像
 
   やること:
-    ・写真：向きを補正し、640 / 1280 / 2048px の3サイズを AVIF・WebP・JPEG で書き出し
+    ・写真：向きを補正し、横幅 640 / 1600px を AVIF・WebP で書き出し（--formats で JPEG も可）
            ぼかしプレビュー用の極小画像を作成、位置情報（GPS）などのメタデータは全て削除
     ・動画：H.264 / 最大1920px に圧縮、ポスター画像を作成、位置情報などのメタデータを削除
-           TOP の動画は音声なし・ループ向け。--av1 を付けると AV1 版も作ります（より軽い）
     ・media/ogp.jpg（1200×630）と media/manifest.json を作成
   動画の変換には ffmpeg が必要です（https://ffmpeg.org/）。
 """
@@ -52,12 +53,24 @@ except ImportError:
 
 PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif", ".tif", ".tiff"}
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".3gp", ".mts"}
-TOOL_VERSION = 2  # 変換方法を変えたら上げる（--incremental でも全部作り直される）
+TOOL_VERSION = 3  # 変換方法を変えたら上げる（--incremental でも全部作り直される）
 GENERATED = re.compile(r"^(\d{2,4}|profile)(-\d+)?\.(jpg|webp|avif|mp4)$")
 
 
+QUIET = False
+
+
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    print(msg, file=sys.stderr if PLAN_MODE else sys.stdout, flush=True)
+
+
+def vlog(msg: str) -> None:
+    """ファイル名を含む細かいログ（--quiet のときは出さない。公開リポジトリの Actions ログ対策）"""
+    if not QUIET:
+        log(msg)
+
+
+PLAN_MODE = False
 
 
 # ---------------------------------------------------------------- helpers
@@ -184,15 +197,6 @@ def clean_generated(folder: Path) -> None:
                 f.unlink()
 
 
-def fingerprint(files: list[Path], settings: dict) -> str:
-    """フォルダの中身（ファイル名・内容）と変換設定から指紋を作る。変わっていなければ作り直さない。"""
-    h = hashlib.sha256(json.dumps({"v": TOOL_VERSION, **settings}, sort_keys=True).encode())
-    for f in sorted(files, key=lambda p: p.name):
-        h.update(f.name.encode() + b"\0")
-        with open(f, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                h.update(chunk)
-    return h.hexdigest()[:20]
 
 
 def remove_scene_files(out_dir: Path, sid: str) -> None:
@@ -205,33 +209,86 @@ def mb(path: Path) -> str:
     return f"{total / 1024 / 1024:.1f}MB"
 
 
+# ---------------------------------------------------------------- inventory
+def md5_of(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def inventory_from_raw(raw: Path) -> dict[str, list[dict]]:
+    """raw/ フォルダから一覧を作る（手元で使うとき）。キー '' はトップ直下のファイル"""
+    inv: dict[str, list[dict]] = {}
+    for f in sorted(raw.iterdir()):
+        if f.name.startswith("."):
+            continue
+        if f.is_file():
+            inv.setdefault("", []).append({"Name": f.name, "Size": f.stat().st_size, "md5": md5_of(f)})
+        elif f.is_dir():
+            inv[f.name] = [{"Name": c.name, "Size": c.stat().st_size, "md5": md5_of(c)}
+                           for c in sorted(f.iterdir()) if c.is_file() and not c.name.startswith(".")]
+    return inv
+
+
+def inventory_from_listing(path: Path) -> dict[str, list[dict]]:
+    """rclone lsjson -R --files-only --hash の出力から一覧を作る（GitHub Actions で使うとき）"""
+    inv: dict[str, list[dict]] = {}
+    for e in json.loads(path.read_text("utf-8")):
+        if e.get("IsDir"):
+            continue
+        parts = e["Path"].split("/")
+        if any(p.startswith(".") for p in parts) or len(parts) > 2:
+            continue  # 隠しファイルと、サブフォルダのさらに中は対象外
+        md5 = (e.get("Hashes") or {}).get("md5") or (e.get("Hashes") or {}).get("MD5") or e.get("ModTime", "")
+        inv.setdefault(parts[0] if len(parts) == 2 else "", []).append({"Name": e["Name"], "Size": e["Size"], "md5": md5})
+    return inv
+
+
+def entries_fp(entries: list[dict], settings: dict) -> str:
+    h = hashlib.sha256(json.dumps({"v": TOOL_VERSION, **settings}, sort_keys=True).encode())
+    for e in sorted(entries, key=lambda e: e["Name"]):
+        h.update(f'{e["Name"]}\0{e["Size"]}\0{e["md5"]}\n'.encode())
+    return h.hexdigest()[:20]
+
+
 # ---------------------------------------------------------------- main
 def main() -> None:
-    global ROOT
+    global ROOT, QUIET, PLAN_MODE
     ap = argparse.ArgumentParser(description="写真・動画を Web 公開用に変換します")
     ap.add_argument("--raw", default="raw", help="元の写真・動画のフォルダ（既定: raw）")
     ap.add_argument("--site", default=".", help="index.html があるフォルダ（既定: カレント）")
     ap.add_argument("--sizes", default="640,1600", help="書き出す横幅（既定: 640,1600）")
     ap.add_argument("--formats", default="avif,webp",
                     help="写真の形式（既定: avif,webp。古いブラウザにも対応するなら avif,webp,jpg）")
-    ap.add_argument("--only", nargs="*", help="指定したフォルダだけ作り直す（例: --only ceremony scenes）")
     ap.add_argument("--av1", action="store_true", help="TOP の動画を AV1 でも書き出す（対応ブラウザでより軽くなる）")
     ap.add_argument("--no-video", action="store_true", help="動画の変換を省略する")
     ap.add_argument("--incremental", action="store_true", help="前回から変わっていないフォルダは作り直さない")
+    ap.add_argument("--listing", help="rclone lsjson の出力（Google ドライブの一覧）。指定すると raw/ の代わりにこれで変更を判定する")
+    ap.add_argument("--plan", action="store_true", help="ダウンロードが必要なパスを1行ずつ出力して終了する（--listing と一緒に使う）")
+    ap.add_argument("--quiet", action="store_true", help="ファイル名を含む細かいログを出さない")
     a = ap.parse_args()
+    QUIET, PLAN_MODE = a.quiet, a.plan
 
     ROOT = Path(a.site).resolve()
     raw = (ROOT / a.raw).resolve() if not Path(a.raw).is_absolute() else Path(a.raw)
     media = ROOT / "media"
-    if not raw.is_dir():
+    if a.listing:
+        inv = inventory_from_listing(Path(a.listing))
+    elif raw.is_dir():
+        inv = inventory_from_raw(raw)
+    else:
         sys.exit(f"{raw} がありません。README.md を見て raw/ フォルダを作ってください。")
+    if a.plan and not a.listing:
+        sys.exit("--plan は --listing と一緒に使ってください")
+
     sizes = [int(s) for s in a.sizes.split(",")]
     formats = [f.strip().lower().replace("jpeg", "jpg") for f in a.formats.split(",") if f.strip()]
     formats = [f for f in ("avif", "webp", "jpg") if f in formats] or ["webp"]
     if "avif" in formats and not features.check("avif"):
         formats.remove("avif")
-        if not formats:
-            formats = ["webp"]
+        formats = formats or ["webp"]
         log("※ この Pillow は AVIF に未対応のため省略します（pip install -U pillow で対応版になります）")
     can_video = bool(shutil.which("ffmpeg") and shutil.which("ffprobe")) and not a.no_video
     if not can_video and not a.no_video:
@@ -242,65 +299,82 @@ def main() -> None:
 
     mf_path = media / "manifest.json"
     manifest = json.loads(mf_path.read_text("utf-8")) if mf_path.exists() else {}
-    manifest.setdefault("galleries", {})
-    manifest.setdefault("portraits", {})
-    manifest.setdefault("scenes", {})
+    for k in ("galleries", "portraits", "scenes"):
+        manifest.setdefault(k, {})
     fps = manifest.setdefault("fingerprints", {})
+    gal_settings = {"sizes": sizes, "formats": formats, "video": can_video, "heif": HEIF}
 
-    folders = sorted(p for p in raw.iterdir() if p.is_dir() and not p.name.startswith("."))
-    if a.only:
-        folders = [p for p in folders if p.name in a.only]
-    else:
-        # raw/ から消えたフォルダ・動画は、media/ と manifest からも消す
-        names = {p.name for p in folders}
-        for name in list(manifest["galleries"]) + list(manifest["portraits"]):
-            if name not in names:
-                manifest["galleries"].pop(name, None)
-                manifest["portraits"].pop(name, None)
-                fps.pop(name, None)
-                shutil.rmtree(media / "photos" / name, ignore_errors=True)
-                shutil.rmtree(media / "videos" / name, ignore_errors=True)
-                log(f"[{name}] raw/ に無いため削除しました")
-        scene_dir = raw / "scenes"
-        stems = {f.stem for f in scene_dir.iterdir() if f.suffix.lower() in VIDEO_EXT} if scene_dir.is_dir() else set()
-        for sid in list(manifest["scenes"]):
-            if sid not in stems:
-                manifest["scenes"].pop(sid)
-                fps.pop(f"scene:{sid}", None)
-                remove_scene_files(media / "videos", sid)
-                log(f"[scene] {sid} は raw/scenes/ に無いため削除しました")
+    # ---- 何を作り直すかを決める（ここまでは元の写真が無くても判定できる）
+    galleries = sorted(k for k in inv if k and k != "scenes")
+    scenes = [e for e in inv.get("scenes", []) if Path(e["Name"]).suffix.lower() in VIDEO_EXT] if can_video else []
+    redo_gal = [g for g in galleries
+                if not (a.incremental and fps.get(g) == entries_fp(inv[g], gal_settings)
+                        and g in manifest["galleries"] and (media / "photos" / g).exists())]
+    redo_scene = [e for e in scenes
+                  if not (a.incremental and fps.get(f"scene:{Path(e['Name']).stem}") == entries_fp([e], {"scene": True, "av1": av1})
+                          and Path(e["Name"]).stem in manifest["scenes"] and (media / "videos" / f"{Path(e['Name']).stem}.mp4").exists())]
+    ogp_entry = next((e for e in inv.get("", []) if Path(e["Name"]).stem.lower() == "ogp" and Path(e["Name"]).suffix.lower() in PHOTO_EXT), None)
+    ogp_fp = entries_fp([ogp_entry], {"ogp": True}) if ogp_entry else "auto"
+    ogp_auto_src = "ceremony" if "ceremony" in inv else (galleries[0] if galleries else None)
+    redo_ogp = not (a.incremental and fps.get("ogp") == ogp_fp and (media / "ogp.jpg").exists()
+                    and (ogp_entry or ogp_auto_src not in redo_gal))
 
-    for folder in folders:
-        name = folder.name
-        files = [f for f in folder.iterdir() if f.is_file() and not f.name.startswith(".")]
+    if a.plan:
+        need = list(redo_gal) + [f"scenes/{e['Name']}" for e in redo_scene]
+        if redo_ogp:
+            if ogp_entry:
+                need.append(ogp_entry["Name"])
+            elif ogp_auto_src and ogp_auto_src not in need:
+                need.append(ogp_auto_src)
+        print("\n".join(need))
+        log(f"作り直し：ギャラリー {len(redo_gal)} / {len(galleries)}、TOP動画 {len(redo_scene)} / {len(scenes)}、OGP {'あり' if redo_ogp else 'なし'}")
+        return
 
-        # ---- TOP の動画
-        if name == "scenes":
-            if not can_video:
-                continue
-            out_dir = media / "videos"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            for f in sorted(files):
-                if f.suffix.lower() not in VIDEO_EXT:
-                    continue
-                fp = fingerprint([f], {"scene": True, "av1": av1})
-                key = f"scene:{f.stem}"
-                if a.incremental and fps.get(key) == fp and f.stem in manifest["scenes"] and (out_dir / f"{f.stem}.mp4").exists():
-                    log(f"[scene] {f.name} 変更なし（スキップ）")
-                    continue
-                log(f"[scene] {f.name} → media/videos/{f.stem}.mp4")
-                remove_scene_files(out_dir, f.stem)
-                manifest["scenes"][f.stem] = convert_scene(f, out_dir, f.stem, av1)
-                fps[key] = fp
-            continue
+    # ---- ドライブ（一覧）から消えたフォルダ・動画は、media/ と manifest からも消す
+    for name in list(manifest["galleries"]) + list(manifest["portraits"]):
+        if name not in galleries:
+            manifest["galleries"].pop(name, None)
+            manifest["portraits"].pop(name, None)
+            fps.pop(name, None)
+            shutil.rmtree(media / "photos" / name, ignore_errors=True)
+            shutil.rmtree(media / "videos" / name, ignore_errors=True)
+            log(f"[{name}] 元のフォルダが無いため削除しました")
+    stems = {Path(e["Name"]).stem for e in scenes}
+    for sid in list(manifest["scenes"]):
+        if sid not in stems and can_video:
+            manifest["scenes"].pop(sid)
+            fps.pop(f"scene:{sid}", None)
+            remove_scene_files(media / "videos", sid)
+            log(f"[scene] {sid} は元のフォルダに無いため削除しました")
 
-        # ---- ギャラリー
-        photo_dir, video_dir = media / "photos" / name, media / "videos" / name
-        fp = fingerprint(files, {"sizes": sizes, "formats": formats, "video": can_video, "heif": HEIF})
-        if a.incremental and fps.get(name) == fp and name in manifest["galleries"] and photo_dir.exists():
+    def need_raw(path: Path) -> Path:
+        if not path.exists():
+            sys.exit(f"{path} がありません（ダウンロードに失敗した可能性があります）")
+        return path
+
+    # ---- TOP の動画
+    if redo_scene:
+        out_dir = media / "videos"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for e in redo_scene:
+            f = need_raw(raw / "scenes" / e["Name"])
+            log(f"[scene] {f.stem} を変換")
+            remove_scene_files(out_dir, f.stem)
+            manifest["scenes"][f.stem] = convert_scene(f, out_dir, f.stem, av1)
+            fps[f"scene:{f.stem}"] = entries_fp([e], {"scene": True, "av1": av1})
+    for e in scenes:
+        if e not in redo_scene:
+            log(f"[scene] {Path(e['Name']).stem} 変更なし（スキップ）")
+
+    # ---- ギャラリー
+    for name in galleries:
+        if name not in redo_gal:
             log(f"[{name}] 変更なし（スキップ）")
             continue
-        log(f"[{name}]")
+        folder = need_raw(raw / name)
+        files = [f for f in sorted(folder.iterdir()) if f.is_file() and not f.name.startswith(".")]
+        photo_dir, video_dir = media / "photos" / name, media / "videos" / name
+        log(f"[{name}] {len(files)} ファイルを変換")
         manifest["portraits"].pop(name, None)
         clean_generated(photo_dir)
         clean_generated(video_dir)
@@ -308,14 +382,15 @@ def main() -> None:
 
         portrait = next((f for f in files if f.stem.lower() == "profile" and f.suffix.lower() in PHOTO_EXT), None)
         if portrait:
-            log(f"  profile: {portrait.name}")
+            vlog(f"  profile: {portrait.name}")
             info = save_photo(open_rgb(portrait), photo_dir / "profile", [480, 960, 1440], formats)
             manifest["portraits"][name] = {"type": "photo", "base": rel(photo_dir / "profile"), **info}
 
         media_files = [f for f in files if f is not portrait and f.suffix.lower() in PHOTO_EXT | VIDEO_EXT]
         skipped = [f.name for f in files if f is not portrait and f not in media_files]
         if skipped:
-            log(f"  対象外のファイルを無視: {', '.join(skipped[:5])}{' …' if len(skipped) > 5 else ''}")
+            log(f"  対象外のファイル {len(skipped)} 件を無視")
+            vlog(f"    {', '.join(skipped[:5])}{' …' if len(skipped) > 5 else ''}")
         heic = [f for f in media_files if f.suffix.lower() in (".heic", ".heif")]
         if heic and not HEIF:
             log("  ! HEIC 写真があります。pip install pillow-heif を実行してから再度お試しください")
@@ -323,7 +398,7 @@ def main() -> None:
         media_files.sort(key=lambda f: (taken_at(f), f.name))
         digits = max(2, len(str(len(media_files))))
 
-        items = []
+        items, failed = [], 0
         for i, f in enumerate(media_files, 1):
             num = str(i).zfill(digits)
             if f.suffix.lower() in VIDEO_EXT:
@@ -331,36 +406,41 @@ def main() -> None:
                     continue
                 video_dir.mkdir(parents=True, exist_ok=True)
                 out, poster = video_dir / f"{num}.mp4", video_dir / f"{num}.jpg"
-                log(f"  {num}  {f.name}（動画）")
+                vlog(f"  {num}  {f.name}（動画）")
                 try:
                     info = convert_video(f, out, poster)
                     items.append({"type": "video", "src": rel(out), "poster": rel(poster), **info})
                 except subprocess.CalledProcessError as e:
-                    log(f"    ! 変換に失敗しました: {e}")
+                    failed += 1
+                    vlog(f"    ! 変換に失敗しました: {e}")
             else:
-                log(f"  {num}  {f.name}")
+                vlog(f"  {num}  {f.name}")
                 try:
                     info = save_photo(open_rgb(f), photo_dir / num, sizes, formats)
                     items.append({"type": "photo", "base": rel(photo_dir / num), **info})
                 except Exception as e:
-                    log(f"    ! 読み込めませんでした: {e}")
+                    failed += 1
+                    vlog(f"    ! 読み込めませんでした: {e}")
+        if failed:
+            log(f"  ! {failed} 件を変換できませんでした")
         manifest["galleries"][name] = items
-        fps[name] = fp
+        fps[name] = entries_fp(inv[name], gal_settings)
 
     # ---- OGP 画像（1200×630）
-    ogp_src = next((p for p in raw.glob("ogp.*") if p.suffix.lower() in PHOTO_EXT), None)
-    if not ogp_src:
-        for g in ["ceremony", *[p.name for p in folders]]:
-            d = raw / g
-            if d.is_dir():
-                cands = sorted((f for f in d.iterdir() if f.suffix.lower() in PHOTO_EXT and f.stem.lower() != "profile"), key=lambda f: (taken_at(f), f.name))
-                if cands:
-                    ogp_src = cands[0]
-                    break
-    if ogp_src and (not a.only or "ogp" in a.only or not (media / "ogp.jpg").exists()):
-        media.mkdir(exist_ok=True)
-        ImageOps.fit(open_rgb(ogp_src), (1200, 630), Image.Resampling.LANCZOS).save(media / "ogp.jpg", "JPEG", quality=85, optimize=True)
-        log(f"[ogp] {ogp_src.name} → media/ogp.jpg")
+    if redo_ogp:
+        src = None
+        if ogp_entry:
+            src = need_raw(raw / ogp_entry["Name"])
+        elif ogp_auto_src and (raw / ogp_auto_src).is_dir():
+            d = raw / ogp_auto_src
+            cands = sorted((f for f in d.iterdir() if f.suffix.lower() in PHOTO_EXT and f.stem.lower() != "profile"),
+                           key=lambda f: (taken_at(f), f.name))
+            src = cands[0] if cands else None
+        if src:
+            media.mkdir(exist_ok=True)
+            ImageOps.fit(open_rgb(src), (1200, 630), Image.Resampling.LANCZOS).save(media / "ogp.jpg", "JPEG", quality=85, optimize=True)
+            fps["ogp"] = ogp_fp
+            log("[ogp] media/ogp.jpg を作成")
 
     manifest["version"] = 1
     manifest["generated"] = datetime.now().isoformat(timespec="seconds")
@@ -378,14 +458,13 @@ def main() -> None:
     log(f"  動画：{video_bytes / 1024 / 1024:.0f}MB")
     for f in all_files:
         if f.stat().st_size > 95 * 1024 * 1024:
-            log(f"  ! {rel(f)} が 95MB を超えています。GitHub は1ファイル100MBまでです。動画を短くするか分割してください")
+            log(f"  ! {rel(f)} が 95MB を超えています。動画を短くするか分割してください")
     total = sum(f.stat().st_size for f in all_files)
     if total > 1000 * 1024 * 1024:
         log("  ! 合計が 1GB を超えています。GitHub Pages は 1GB までしか公開できません。")
         log("    長い動画を YouTube の限定公開に移すか、--sizes 640,1280 で写真を小さくしてください")
     elif total > 850 * 1024 * 1024:
         log("  ! 合計が 850MB を超えています。GitHub Pages の上限（1GB）に近づいています")
-    log("index.html と media/ を GitHub に置いてください（raw/ は置かないでください）。")
 
 
 if __name__ == "__main__":
