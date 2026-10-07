@@ -1,0 +1,176 @@
+# Google ドライブの写真・動画を Web 用に変換して、公開用リポジトリの GitHub Pages に反映するワークフロー
+#
+# 構成：
+#   Google ドライブ   … 「Wedding」フォルダ（中に scenes/ ceremony/ groom/ … のフォルダ）。元の写真はここだけに置く
+#   wedding-src（非公開）… tools/・index.html・このファイル
+#   wedding    （公開）  … このワークフローが index.html と media/ だけを gh-pages ブランチに書き込む
+#
+# 必要な Secrets（wedding-src の Settings → Secrets and variables → Actions）：
+#   GDRIVE_SA_JSON      … Google のサービスアカウントの鍵（JSON の中身をそのまま）
+#   GDRIVE_FOLDER_ID    … ドライブの「Wedding」フォルダの ID（URL の folders/ の後ろ）
+#   ACTIONS_DEPLOY_KEY  … 公開用リポジトリへ書き込むデプロイキー（秘密鍵）
+#
+# 動くタイミング：
+#   ・1日3回（日本時間 6:23 / 12:23 / 18:23）ドライブを確認。変更が無ければ公開しない
+#   ・tools/・index.html の変更を push したとき
+#   ・Actions タブの「Run workflow」ボタンを押したとき（すぐ反映したいとき）
+
+name: Build media & deploy
+
+on:
+  schedule:
+    - cron: '23 21,3,9 * * *'   # UTC 表記（日本時間 6:23 / 12:23 / 18:23）
+  push:
+    branches: [main]
+    paths:
+      - 'tools/**'
+      - 'index.html'
+      - '.github/workflows/build-and-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      av1:
+        description: 'TOPの動画を AV1 でも書き出す（軽くなるが時間がかかる）'
+        type: boolean
+        default: false
+      full:
+        description: '変更の有無にかかわらず全部作り直す'
+        type: boolean
+        default: false
+
+env:
+  PAGES_REPO: chochopolice/wedding   # ★公開用リポジトリ（ユーザー名/リポジトリ名）
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false   # 実行中の変換は止めず、次の実行は終わるまで待つ
+
+permissions:
+  contents: read
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check secrets
+        env:
+          SA: ${{ secrets.GDRIVE_SA_JSON }}
+          FOLDER: ${{ secrets.GDRIVE_FOLDER_ID }}
+          KEY: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+        run: |
+          missing=""
+          [ -n "$SA" ] || missing="$missing GDRIVE_SA_JSON"
+          [ -n "$FOLDER" ] || missing="$missing GDRIVE_FOLDER_ID"
+          [ -n "$KEY" ] || missing="$missing ACTIONS_DEPLOY_KEY"
+          if [ -n "$missing" ]; then echo "::error::Secrets が未設定です:$missing（README の手順を確認してください）"; exit 1; fi
+
+      - name: Install ffmpeg and rclone
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg rclone
+
+      # 前回ダウンロードした元データ（raw/）と変換結果（media/）を戻す → 変わった分だけ処理する
+      - name: Restore previous files
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            raw
+            media
+            .state
+          key: drive-none
+          restore-keys: drive-
+
+      - name: Reset media (full rebuild)
+        if: ${{ inputs.full }}
+        run: rm -rf media .state
+
+      - name: Download from Google Drive
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive.readonly
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GDRIVE_SA_JSON }}
+        run: |
+          mkdir -p raw
+          rclone sync gdrive: raw \
+            --drive-skip-gdocs --drive-skip-shortcuts --fast-list \
+            --transfers 8 --checkers 16 \
+            --exclude 'desktop.ini' --exclude '.DS_Store' --exclude 'Thumbs.db' \
+            --stats-one-line --stats 30s -v
+          echo "ダウンロード済み：$(find raw -type f | wc -l) ファイル / $(du -sh raw | cut -f1)"
+          if [ -z "$(ls -A raw)" ]; then echo "::error::ドライブのフォルダが空か、サービスアカウントに共有されていません"; exit 1; fi
+
+      - name: Compute state key
+        id: state
+        run: |
+          key=$( { find raw -type f -printf '%P %s %T@\n' | sort; sha256sum index.html tools/prepare_media.py; echo "av1=${{ inputs.av1 }}"; } | sha256sum | cut -c1-24 )
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          # 前回保存した状態と違えば、今回の結果を保存し直す
+          if [ "$key" = "$(cat .state/key 2>/dev/null)" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install Python packages
+        run: pip install --upgrade pillow pillow-heif
+
+      - name: Convert photos and videos
+        run: python tools/prepare_media.py --incremental ${{ inputs.av1 && '--av1' || '' }}
+
+      - name: Assemble site
+        id: site
+        run: |
+          rm -rf dist && mkdir dist
+          cp index.html dist/
+          cp -r media dist/
+          touch dist/.nojekyll
+          du -sh dist
+          # GitHub は 1 ファイル 100MB まで、GitHub Pages は 1 サイト 1GB まで
+          big=$(find dist -type f -size +95M)
+          if [ -n "$big" ]; then echo "::error::95MB を超えるファイルがあります: $big"; exit 1; fi
+          total=$(du -sm dist | cut -f1)
+          if [ "$total" -gt 1000 ]; then echo "::error::サイト全体が ${total}MB です。GitHub Pages は 1GB までです"; exit 1; fi
+          if [ "$total" -gt 850 ]; then echo "::warning::サイト全体が ${total}MB です。上限の 1GB に近づいています"; fi
+          # 前回公開した内容と同じなら公開しない（manifest の作成日時は比較から除く）
+          hash=$( { (cd dist && find . -type f -not -name manifest.json -print0 | sort -z | xargs -0 sha256sum); grep -v '"generated"' media/manifest.json; } | sha256sum | cut -c1-24 )
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          if [ "$hash" = "$(cat .state/deployed 2>/dev/null)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"; echo "変更なし：公開はスキップします"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to public repository
+        if: ${{ steps.site.outputs.changed == 'true' }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+          external_repository: ${{ env.PAGES_REPO }}
+          publish_branch: gh-pages
+          publish_dir: ./dist
+          force_orphan: true   # 履歴を残さず毎回1コミットにする（容量の増え続けを防ぐ）
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Record deployed state
+        run: |
+          mkdir -p .state
+          echo "${{ steps.site.outputs.hash }}" > .state/deployed
+          echo "${{ steps.state.outputs.key }}" > .state/key
+
+      # ドライブの中身・index.html・ツール・公開内容のどれかが前回と違うときだけ保存する
+      # （キーに実行番号を付けるので、次回は必ず一番新しい状態が戻る）
+      - name: Save files for next run
+        if: ${{ steps.state.outputs.changed == 'true' || steps.site.outputs.changed == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            raw
+            media
+            .state
+          key: drive-${{ steps.state.outputs.key }}-${{ github.run_id }}
