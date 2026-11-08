@@ -10,15 +10,15 @@
 <meta name="theme-color" content="#fbfaf8">
 <!--
   LINE などで URL を送ったときのサムネイル（OGP）。
-  ★公開URLに合わせて og:url と og:image の「https://chochopolice.github.io/wedding/」部分を書き換えてください。
+  ★GitHub Actions で公開するときは、タイトル・説明文・URL を設定シートと公開先から自動で書き込みます（手で直す必要はありません）。
   ★media/ogp.jpg は tools/prepare_media.py が自動で作ります（1200×630）。
 -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Our Wedding in Guam">
 <meta property="og:title" content="Taro &amp; Hanako | Our Wedding in Guam">
 <meta property="og:description" content="グアムで挙げた結婚式の写真と動画をまとめました。">
-<meta property="og:url" content="https://chochopolice.github.io/wedding/">
-<meta property="og:image" content="https://chochopolice.github.io/wedding/media/ogp.jpg">
+<meta property="og:url" content="https://example.github.io/wedding/">
+<meta property="og:image" content="https://example.github.io/wedding/media/ogp.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
@@ -29,10 +29,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Pinyon+Script&family=Shippori+Mincho:wght@400;500;600&display=swap" rel="stylesheet">
 <!--
 =====================================================================
-  使い方（詳しくは README.md）
+  ★ふだんは、このファイルを書き換える必要はありません。
+    名前・あいさつ文・ギャラリー・TOP の動画・クリック範囲などは、
+    Google ドライブの「settings」スプレッドシートで設定します（はじめかたガイド参照）。
+    ここに書いてある値は、設定シートが無いときのサンプルです。
+  ---------------------------------------------------------------
+  手元で変換する場合の使い方（詳しくは README.md）
   ---------------------------------------------------------------
   1. Googleフォトのアルバムをダウンロードし、raw/ フォルダに振り分ける
-       raw/scenes/chapel.mp4  city.mp4  beach.mp4   … TOPの3本の動画
+       raw/scenes/chapel.mp4  city.mp4  beach.mp4  tour.mp4  drive.mp4   … TOPの5本の動画
        raw/ceremony/   raw/groom/   raw/bride/       … 写真・動画（profile.jpg はプロフィール写真）
        raw/city-restaurant/  raw/city-boutique/ … （下の GALLERIES の名前と同じフォルダ名）
   2. python tools/prepare_media.py を実行
@@ -83,20 +88,17 @@ img,video{max-width:100%;display:block}
 .menu-btn span{position:absolute;left:10px;right:10px;height:1px;background:var(--ink);transition:.3s}
 .menu-btn span:nth-child(1){top:16px}
 .menu-btn span:nth-child(2){top:24px}
-@media (min-width:821px){
-  /* PCでは popover を通常のメニューとして表示 */
-  .nav[popover]{display:flex;position:static;inset:auto;margin:0;padding:0;border:0;background:none;overflow:visible;width:auto;height:auto}
-}
-@media (max-width:820px){
-  .menu-btn{display:block}
-  .nav[popover]{position:fixed;inset:var(--header-h) 0 auto 0;margin:0;width:100%;height:auto;border:0;border-bottom:1px solid var(--line);flex-direction:column;align-items:center;gap:16px;padding:26px 0 32px;background:color-mix(in srgb,var(--pearl) 97%,transparent);opacity:0;translate:0 -10px;transition:opacity .35s,translate .35s,display .35s allow-discrete,overlay .35s allow-discrete}
-  .nav[popover]:not(:popover-open){display:none}
-  .nav[popover]:popover-open{display:flex;opacity:1;translate:0 0}
-  @starting-style{.nav[popover]:popover-open{opacity:0;translate:0 -10px}}
-  .nav::backdrop{background:rgba(30,35,40,.15)}
-  body:has(.nav:popover-open) .menu-btn span:nth-child(1){top:20px;transform:rotate(45deg)}
-  body:has(.nav:popover-open) .menu-btn span:nth-child(2){top:20px;transform:rotate(-45deg)}
-}
+/* メニューが 1 行に収まるときは横並び、収まらない（または画面が狭い）ときは ≡ ボタンで開く（JS が html に nav-compact を付ける） */
+html:not(.nav-compact) .nav[popover]{display:flex;position:static;inset:auto;margin:0;padding:0;border:0;background:none;overflow:visible;width:auto;height:auto}
+.nav a{white-space:nowrap}
+.nav-compact .menu-btn{display:block}
+.nav-compact .nav[popover]{position:fixed;inset:var(--header-h) 0 auto 0;margin:0;width:100%;height:auto;border:0;border-bottom:1px solid var(--line);flex-direction:column;align-items:center;gap:16px;padding:26px 0 32px;background:color-mix(in srgb,var(--pearl) 97%,transparent);opacity:0;translate:0 -10px;transition:opacity .35s,translate .35s,display .35s allow-discrete,overlay .35s allow-discrete}
+.nav-compact .nav[popover]:not(:popover-open){display:none}
+.nav-compact .nav[popover]:popover-open{display:flex;opacity:1;translate:0 0}
+@starting-style{.nav-compact .nav[popover]:popover-open{opacity:0;translate:0 -10px}}
+.nav-compact .nav::backdrop{background:rgba(30,35,40,.15)}
+body:has(.nav:popover-open) .menu-btn span:nth-child(1){top:20px;transform:rotate(45deg)}
+body:has(.nav:popover-open) .menu-btn span:nth-child(2){top:20px;transform:rotate(-45deg)}
 
 main{padding-top:var(--header-h)}
 .view[hidden]{display:none}
@@ -347,12 +349,7 @@ html.feather-on dialog::backdrop{cursor:none}
 <header class="site-header">
   <a class="logo" href="#/" id="logo"></a>
   <nav class="nav" id="nav" popover aria-label="メインメニュー">
-    <a href="#/">Top</a>
-    <a href="#/gallery/ceremony">Ceremony</a>
-    <a href="#/profile/groom">Groom</a>
-    <a href="#/profile/bride">Bride</a>
-    <a href="#/scene/city">Guam</a>
-    <a href="#/scene/beach">Tumon Beach</a>
+    <!-- メニューは TOP のシーンから自動で作ります -->
   </nav>
   <button class="menu-btn" popovertarget="nav" aria-label="メニュー"><span></span><span></span></button>
 </header>
@@ -431,8 +428,8 @@ html.feather-on dialog::backdrop{cursor:none}
 
 <script type="module">
 /* =====================================================================
-   1. 基本情報（ここを書き換えてください）
-   ※ ページ上部の <title> と OGP（og:title など）も同じ名前に変えてください
+   1. 基本情報（設定シート「基本情報」があればそちらが優先されます）
+   ※ 設定シートを使わずに手で公開する場合は、ページ上部の <title> と OGP（og:title など）も同じ名前に変えてください
    ===================================================================== */
 const SITE = {
   groom: 'Taro',
@@ -484,16 +481,22 @@ const GALLERIES = {
   },
   'groom':  { en: 'Groom', ja: '新郎の写真', group: 'Profile', hue: 205, photos: 9 },
   'bride':  { en: 'Bride', ja: '新婦の写真', group: 'Profile', hue: 350, photos: 9 },
+  'tour-lovers':     { en: 'Two Lovers Point', ja: '恋人岬', group: 'Sightseeing', hue: 200, lead: '断崖から見下ろす、どこまでも青い海。', photos: 8 },
+  'tour-hagatna':    { en: 'Hagåtña', ja: 'ハガニア（スペイン広場）', group: 'Sightseeing', hue: 28, lead: 'スペイン統治時代の面影が残る街を散策。', photos: 8 },
+  'tour-chamorro':   { en: 'Chamorro Village', ja: 'チャモロビレッジ', group: 'Sightseeing', hue: 12, lead: 'ナイトマーケットとチャモロ料理。', photos: 8 },
+  'city-street':     { en: 'Streets', ja: '街の風景', group: 'Guam City', hue: 196, lead: 'ヤシの並木とカラフルな街並み。', photos: 10 },
   'city-restaurant': { en: 'Restaurant', ja: 'レストラン', group: 'Guam City', hue: 18, lead: 'グアムの街で立ち寄ったレストラン。', photos: 8 },
   'city-boutique':   { en: 'Boutique', ja: 'ブランドショップ', group: 'Guam City', hue: 44, lead: 'ショッピングの思い出。', photos: 8 },
   'city-cafe':       { en: 'Café', ja: 'カフェ', group: 'Guam City', hue: 165, lead: 'ひと休みしたカフェ。', photos: 6 },
   'beach-shore':     { en: 'Tumon Beach', ja: 'タモンビーチ', group: 'Tumon Beach', hue: 188, lead: '白い砂浜と青い海。', photos: 10 },
   'beach-bar':       { en: 'Beach Bar', ja: 'ビーチバー', group: 'Tumon Beach', hue: 30, lead: '夕暮れのビーチバーで。', photos: 6 },
-  'beach-hotel':     { en: 'Hotel', ja: 'ホテル', group: 'Tumon Beach', hue: 210, lead: '滞在したホテル。', photos: 6 }
+  'beach-hotel':     { en: 'Hotel', ja: 'ホテル', group: 'Tumon Beach', hue: 210, lead: '滞在したホテル。', photos: 6 },
+  'drive-road':      { en: 'Drive', ja: 'ドライブ', group: 'Ocean Drive', hue: 192, lead: 'レンタカーで海沿いの道を走りました。', photos: 8 },
+  'drive-view':      { en: 'Ocean View', ja: '車窓と寄り道', group: 'Ocean Drive', hue: 172, lead: '途中で車を止めて眺めた景色。', photos: 8 }
 };
 
 /* =====================================================================
-   4. TOPのシーン（左＝街／中央＝式場／右＝ビーチ）
+   4. TOPのシーン（左から 観光／街／式場／ビーチ／ドライブ。並べた順に左右へスライドします）
    hotspots の x,y,w,h は動画内の位置（0〜1 の割合。?edit で測れます）。
    上に書いたものほど手前（優先）になります。
    auto:'groom' / auto:'bride' … AIが動画内の人物を検出して自動で追従します。
@@ -503,8 +506,17 @@ const GALLERIES = {
    ===================================================================== */
 const SCENES = [
   {
+    id: 'tour', en: 'Sightseeing', ja: 'グアム観光', video: 'media/videos/tour.mp4', draw: 'tour',
+    hotspots: [
+      { label: 'Two Lovers Point', ja: '恋人岬', go: '#/gallery/tour-lovers', x: .02, y: .08, w: .3, h: .62, pin: [.45, .12] },
+      { label: 'Hagåtña', ja: 'ハガニア（スペイン広場）', go: '#/gallery/tour-hagatna', x: .35, y: .3, w: .32, h: .52, pin: [.5, .12] },
+      { label: 'Chamorro Village', ja: 'チャモロビレッジ', go: '#/gallery/tour-chamorro', x: .7, y: .34, w: .28, h: .5, pin: [.5, .14] }
+    ]
+  },
+  {
     id: 'city', en: 'Guam City', ja: 'グアムの街並み', video: 'media/videos/city.mp4', draw: 'city',
     hotspots: [
+      { label: 'Streets', ja: '街の風景', go: '#/gallery/city-street', x: 0, y: .84, w: 1, h: .16, pin: [.5, .3] },
       { label: 'Restaurant', ja: 'レストラン', go: '#/gallery/city-restaurant', x: .05, y: .28, w: .26, h: .55, pin: [.5, .12] },
       { label: 'Boutique', ja: 'ブランドショップ', go: '#/gallery/city-boutique', x: .36, y: .18, w: .28, h: .65, pin: [.5, .14] },
       { label: 'Café', ja: 'カフェ', go: '#/gallery/city-cafe', x: .69, y: .32, w: .26, h: .51, pin: [.5, .14] }
@@ -525,17 +537,23 @@ const SCENES = [
       { label: 'Beach Bar', ja: 'ビーチバー', go: '#/gallery/beach-bar', x: .66, y: .38, w: .27, h: .44, pin: [.5, .2] },
       { label: 'Tumon Beach', ja: 'タモンビーチ', go: '#/gallery/beach-shore', x: .3, y: .64, w: .32, h: .32, pin: [.5, .25] }
     ]
+  },
+  {
+    id: 'drive', en: 'Ocean Drive', ja: '海沿いのドライブ', video: 'media/videos/drive.mp4', draw: 'drive',
+    hotspots: [
+      { label: 'Ocean View', ja: '車窓と寄り道', go: '#/gallery/drive-view', x: .02, y: .1, w: .4, h: .45, pin: [.5, .3] },
+      { label: 'Drive', ja: 'ドライブ', go: '#/gallery/drive-road', x: .3, y: .25, w: .68, h: .45, pin: [.6, .35] }
+    ]
   }
 ];
-const START_SCENE = 1; // 最初に表示するシーン（0=街, 1=式場, 2=ビーチ）
-const PINS = 'none';   // 動画の上のクリックできる場所の白い目印：'normal'（通常）／'small'（極小）／'none'（表示しない）
-document.body.dataset.pins = PINS;
-const CURSOR = 'feather';  // マウスカーソル：'feather'（羽ペン＋追いかける金の粒子）／'default'（通常のカーソル）
-const FEATHER_SIZE = 50;   // 羽ペンの横幅（px）。粒子の大きさもこれに合わせて変わります
+let START_SCENE = 'chapel'; // 最初に表示するシーンの id（'tour' / 'city' / 'chapel' / 'beach' / 'drive'）
+let PINS = 'none';   // 動画の上のクリックできる場所の白い目印：'normal'（通常）／'small'（極小）／'none'（表示しない）
+let CURSOR = 'feather';  // マウスカーソル：'feather'（羽ペン＋追いかける金の粒子）／'default'（通常のカーソル）
+let FEATHER_SIZE = 50;   // 羽ペンの横幅（px）。粒子の大きさもこれに合わせて変わります
 
 /* =====================================================================
    5. BGM（右下の ♪ ボタンで再生。ブラウザの決まりで、最初は必ず閲覧者がボタンを押してから鳴ります）
-   ・曲のファイルは Google ドライブの bgm/ フォルダに chapel / city / beach という名前で置く
+   ・曲のファイルは Google ドライブの bgm/ フォルダに chapel / city / beach / drive という名前で置く
      （mp3・m4a・wav など。変換ツールが音量をそろえて media/bgm/ に書き出します）
    ・ファイルが無い曲は、ブラウザの中で雰囲気の近い音楽を自動演奏します（サンプル）
    ・pick：どの画面でどの曲を流すか。画面の名前（シーン名・ギャラリー名）の先頭で判定します
@@ -546,8 +564,9 @@ const BGM = {
   waves: true,       // ビーチでは、曲に波の音を重ねる
   pick: {
     chapel: ['chapel', 'ceremony', 'groom', 'bride'],   // 式場の動画、挙式・新郎・新婦のページ
-    city: ['city'],                                      // 街並みの動画、街のお店のページ
-    beach: ['beach']                                     // ビーチの動画、ビーチのページ
+    city: ['city', 'tour'],                              // 街並み・観光の動画、街のお店・観光地のページ
+    beach: ['beach'],                                    // ビーチの動画、ビーチのページ
+    drive: ['drive']                                     // ドライブの動画、ドライブのページ
   }
 };
 
@@ -595,13 +614,74 @@ try {
   if (r.ok) MANIFEST = await r.json();
 } catch { /* manifest が無ければ手置きのファイル／サンプルを使う */ }
 
+/* ---------- config.json（ドライブの settings スプレッドシートから tools/build_config.py が作る） ---------- */
+let CAPTIONS = {};
+const hueOf = id => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 17);
+try {
+  const ctl = new AbortController(); setTimeout(() => ctl.abort(), 2500);
+  const r = await fetch('config.json', { cache: 'no-cache', signal: ctl.signal });
+  if (r.ok) applyConfig(await r.json());
+} catch (e) { if (!(e instanceof TypeError) && e.name !== 'AbortError') console.warn('config.json を読み込めませんでした', e); }
+
+function applyConfig(cfg) {
+  const site = cfg.site || {};
+  for (const k of ['groom', 'bride', 'date', 'place', 'title']) if (site[k]) SITE[k] = site[k];
+  if (site.greeting?.length) SITE.greeting = site.greeting;
+  for (const id of ['groom', 'bride']) {
+    const p = cfg.profiles?.[id]; if (!p) continue;
+    for (const k of ['nameEn', 'nameJa', 'message']) if (p[k]) PROFILES[id][k] = p[k];
+    if (p.details?.length) PROFILES[id].details = p.details;
+  }
+  if (cfg.galleries?.length) {
+    const old = { ...GALLERIES };
+    for (const k of Object.keys(GALLERIES)) delete GALLERIES[k];
+    for (const g of cfg.galleries) {
+      const o = old[g.id] || {};
+      GALLERIES[g.id] = { ...o, en: g.en || o.en || g.id, ja: g.ja ?? o.ja ?? '', group: g.group || o.group || 'Gallery', lead: g.lead ?? o.lead ?? '', hue: o.hue ?? hueOf(g.id), photos: o.photos ?? 6, videos: o.videos, captions: o.captions };
+    }
+  }
+  CAPTIONS = cfg.captions || {};
+  if (cfg.scenes?.length) {
+    const hs = cfg.hotspots || [];
+    const go = t => t === 'groom' || t === 'bride' ? `#/profile/${t}` : `#/gallery/${t}`;
+    const fresh = cfg.scenes.map(sc => ({
+      id: sc.id, en: sc.en || sc.id, ja: sc.ja || '', video: `media/videos/${sc.id}.mp4`, draw: sc.id, petals: !!sc.petals,
+      hotspots: hs.filter(h => h.scene === sc.id).map(h => ({ label: h.label, ja: h.ja || '', go: go(h.go), x: h.x, y: h.y, w: h.w, h: h.h, pin: [.5, .15], auto: h.auto || undefined }))
+    }));
+    SCENES.splice(0, SCENES.length, ...fresh);
+    START_SCENE = cfg.scenes.find(sc => sc.start)?.id || (SCENES.some(sc => sc.id === START_SCENE) ? START_SCENE : SCENES[Math.floor(SCENES.length / 2)].id);
+    // BGM：シーンごとに選んだ曲を、そのシーンから開くページでも流す
+    const pick = {};
+    for (const sc of cfg.scenes) {
+      if (!sc.bgm) continue;
+      const list = (pick[sc.bgm] ||= []);
+      list.push(sc.id, ...hs.filter(h => h.scene === sc.id).map(h => h.go));
+    }
+    BGM.pick = pick;
+  }
+  const d = cfg.display || {};
+  if (d.cursor) CURSOR = d.cursor;
+  if (d.featherSize) FEATHER_SIZE = d.featherSize;
+  if (d.pins) PINS = d.pins;
+  if (d.bgmShow != null) BGM.show = d.bgmShow;
+  if (d.volume != null) BGM.volume = d.volume;
+  if (d.waves != null) BGM.waves = d.waves;
+}
+// ドライブにあるのに設定シートに書いていないフォルダも、ギャラリーとして表示する
+for (const id of Object.keys(MANIFEST?.galleries || {}))
+  if (!GALLERIES[id]) GALLERIES[id] = { en: id, ja: '', group: 'Gallery', hue: hueOf(id), photos: 0 };
+for (const id of ['groom', 'bride']) if (!GALLERIES[id]) GALLERIES[id] = { en: id === 'groom' ? 'Groom' : 'Bride', ja: id === 'groom' ? '新郎の写真' : '新婦の写真', group: 'Profile', hue: id === 'groom' ? 205 : 350, photos: 6 };
+const START_IDX = Math.max(0, SCENES.findIndex(s => s.id === START_SCENE));
+document.body.dataset.pins = PINS;
+
 function galleryItems(id) {
   const g = GALLERIES[id];
   if (g._items) return g._items;
   const caps = g.captions || [];
   let items;
   if (MANIFEST?.galleries?.[id]?.length) {
-    items = MANIFEST.galleries[id].map((it, i) => ({ ...it, caption: it.caption || caps[i] || '' }));
+    const cap = CAPTIONS[id] || {};
+    items = MANIFEST.galleries[id].map((it, i) => ({ ...it, caption: it.caption || cap[it.k] || cap[`#${i + 1}`] || caps[i] || '' }));
   } else {
     const dir = `media/photos/${id}`;
     items = [
@@ -920,6 +1000,149 @@ DRAW.beach = function (c, w, h, t) {
   palm(c, X(.29), Y(.62), h * .26, t + 2);
 };
 
+/* 観光：左＝恋人岬の断崖と展望台／中央＝スペイン広場の白いアーチ／右＝チャモロビレッジとラッテストーン */
+DRAW.tour = function (c, w, h, t) {
+  const X = v => v * w, Y = v => v * h;
+  let g = c.createLinearGradient(0, 0, 0, Y(.56)); g.addColorStop(0, '#8ec6e6'); g.addColorStop(1, '#e3f1f4');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  for (let k = 0; k < 4; k++) { const cx = ((k * .27 + t * .004 * (1 + k * .4)) % 1.3) - .15; cloud(c, X(cx), Y(.09 + k * .04), w * .04 * (1 + (k % 2) * .6), 'rgba(255,255,255,.8)'); }
+  g = c.createLinearGradient(0, Y(.5), 0, Y(.8)); g.addColorStop(0, '#2f86b5'); g.addColorStop(.5, '#3fa9c4'); g.addColorStop(1, '#7fd3d0');
+  c.fillStyle = g; c.fillRect(0, Y(.5), w, Y(.32));
+  c.fillStyle = 'rgba(255,255,255,.45)';
+  for (let k = 0; k < 16; k++) { const yy = Y(.52 + (k % 6) * .045); const xx = X((((k * .19) + t * .01 * (1 + (k % 3) * .3)) % 1.1) - .05); c.fillRect(xx, yy, X(.025 + (k % 4) * .008), Math.max(1, h * .0025)); }
+  // 恋人岬：断崖
+  c.fillStyle = '#8f7a5e'; c.beginPath(); c.moveTo(0, Y(.2)); c.lineTo(X(.26), Y(.2)); c.quadraticCurveTo(X(.31), Y(.24), X(.3), Y(.4)); c.lineTo(X(.33), Y(.82)); c.lineTo(0, Y(.82)); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(70,55,40,.35)'; for (let k = 0; k < 6; k++) c.fillRect(X(.04 + k * .045), Y(.3 + (k % 3) * .1), X(.006), Y(.3));
+  c.fillStyle = '#5e9a5c'; c.beginPath(); c.moveTo(0, Y(.17)); c.quadraticCurveTo(X(.14), Y(.13), X(.28), Y(.2)); c.lineTo(X(.28), Y(.23)); c.lineTo(0, Y(.23)); c.closePath(); c.fill();
+  // 展望台と鐘
+  c.fillStyle = '#f6f3ee'; c.fillRect(X(.13), Y(.08), X(.12), Y(.035)); c.fillRect(X(.145), Y(.115), X(.012), Y(.07)); c.fillRect(X(.225), Y(.115), X(.012), Y(.07));
+  c.strokeStyle = '#f6f3ee'; c.lineWidth = Math.max(1, h * .003);
+  c.beginPath(); for (let k = 0; k <= 8; k++) { c.moveTo(X(.13 + k * .015), Y(.08)); c.lineTo(X(.13 + k * .015), Y(.055)); } c.moveTo(X(.13), Y(.055)); c.lineTo(X(.25), Y(.055)); c.stroke();
+  c.save(); c.translate(X(.19), Y(.15)); c.rotate(Math.sin(t * 1.4) * .12);
+  c.fillStyle = '#c9a45c'; c.beginPath(); c.moveTo(-h * .012, h * .03); c.quadraticCurveTo(-h * .014, 0, 0, 0); c.quadraticCurveTo(h * .014, 0, h * .012, h * .03); c.closePath(); c.fill(); c.restore();
+  // ハートのモニュメント
+  const hx = X(.07), hy = Y(.13), hs = h * .03;
+  c.fillStyle = '#e8828f'; c.beginPath(); c.moveTo(hx, hy + hs * .9); c.bezierCurveTo(hx - hs * 1.4, hy, hx - hs * .6, hy - hs * .9, hx, hy - hs * .2); c.bezierCurveTo(hx + hs * .6, hy - hs * .9, hx + hs * 1.4, hy, hx, hy + hs * .9); c.fill();
+  c.fillStyle = '#6e5b45'; c.fillRect(hx - X(.002), hy + hs * .9, X(.004), Y(.05));
+  textC(c, 'TWO LOVERS POINT', X(.155), Y(.27), h * .03, '#fffaf2', 'italic 600');
+  // スペイン広場：白い回廊と赤い瓦
+  c.fillStyle = 'rgba(60,60,60,.12)'; c.fillRect(X(.365), Y(.39), X(.3), Y(.43));
+  c.fillStyle = '#f3ece0'; c.fillRect(X(.36), Y(.38), X(.3), Y(.44));
+  c.fillStyle = '#c1593c'; c.beginPath(); c.moveTo(X(.34), Y(.39)); c.lineTo(X(.38), Y(.33)); c.lineTo(X(.64), Y(.33)); c.lineTo(X(.68), Y(.39)); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(120,40,25,.45)'; c.lineWidth = Math.max(1, h * .002);
+  for (let k = 0; k < 24; k++) { const x = X(.38 + k * .011); c.beginPath(); c.moveTo(x, Y(.333)); c.lineTo(x - X(.004 * (k < 12 ? 1 : -1)), Y(.388)); c.stroke(); }
+  c.fillStyle = '#efe6d6'; c.fillRect(X(.475), Y(.2), X(.07), Y(.14));
+  c.fillStyle = '#c1593c'; c.beginPath(); c.moveTo(X(.465), Y(.205)); c.lineTo(X(.51), Y(.16)); c.lineTo(X(.555), Y(.205)); c.closePath(); c.fill();
+  archWin(c, X(.493), Y(.225), X(.034), Y(.08), t, false);
+  for (let k = 0; k < 5; k++) {
+    const ax = X(.375 + k * .056), aw = X(.04), top = Y(.47);
+    c.fillStyle = '#c8b9a2'; c.beginPath(); c.moveTo(ax, Y(.82)); c.lineTo(ax, top + aw / 2); c.arc(ax + aw / 2, top + aw / 2, aw / 2, Math.PI, 0); c.lineTo(ax + aw, Y(.82)); c.closePath(); c.fill();
+    c.fillStyle = 'rgba(90,70,50,.35)'; c.fillRect(ax + aw * .1, Y(.62), aw * .8, Y(.2));
+  }
+  [.4, .46, .52, .58].forEach(x => { c.fillStyle = '#e4d7c3'; c.fillRect(X(x), Y(.405), X(.03), Y(.045)); });
+  textC(c, 'PLAZA DE ESPAÑA', X(.51), Y(.43), h * .026, '#8b6b45', 'italic 600');
+  // チャモロビレッジ：茅葺きの屋台と電球
+  [[.71, .4], [.84, .44]].forEach(([x, y], i) => {
+    c.fillStyle = '#a07a4e'; c.fillRect(X(x + .01), Y(y + .09), X(.006), Y(.82 - y - .09)); c.fillRect(X(x + .11), Y(y + .09), X(.006), Y(.82 - y - .09));
+    c.fillStyle = '#c9a66b'; c.beginPath(); c.moveTo(X(x - .015), Y(y + .1)); c.lineTo(X(x + .065), Y(y)); c.lineTo(X(x + .145), Y(y + .1)); c.closePath(); c.fill();
+    c.strokeStyle = '#a8864f'; c.lineWidth = Math.max(1, h * .002);
+    for (let k = 0; k < 14; k++) { const xx = X(x - .01 + k * .011); c.beginPath(); c.moveTo(xx, Y(y + .09)); c.lineTo(xx + X(.002), Y(y + .115)); c.stroke(); }
+    c.fillStyle = i ? '#e5a35a' : '#d9765b'; c.fillRect(X(x + .02), Y(y + .2), X(.09), Y(.05));
+    c.fillStyle = 'rgba(255,214,150,.55)'; c.fillRect(X(x + .016), Y(y + .12), X(.1), Y(.08));
+    for (let k = 0; k < 7; k++) circ(c, X(x + .005 + k * .02), Y(y + .115) + Math.sin(k / 6 * Math.PI) * h * .012, h * .005, (Math.floor(t * 2) + k + i) % 2 ? 'rgba(255,220,140,.95)' : 'rgba(255,245,210,.55)');
+  });
+  textC(c, 'CHAMORRO VILLAGE', X(.82), Y(.36), h * .03, '#7b4a2a', 'italic 600');
+  // ラッテストーン
+  [.755, .8].forEach(x => {
+    c.fillStyle = '#b3a99b'; c.fillRect(X(x) - X(.009), Y(.72), X(.018), Y(.1));
+    c.beginPath(); c.ellipse(X(x), Y(.72), X(.022), Y(.028), 0, Math.PI, 0); c.fill();
+  });
+  // 地面（広場の石畳と芝生）
+  g = c.createLinearGradient(0, Y(.82), 0, h); g.addColorStop(0, '#d9cdb8'); g.addColorStop(1, '#c4b597');
+  c.fillStyle = g; c.fillRect(0, Y(.82), w, Y(.18));
+  c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1;
+  for (let k = 0; k < 7; k++) { c.beginPath(); c.moveTo(0, Y(.84 + k * .025)); c.lineTo(w, Y(.84 + k * .025)); c.stroke(); }
+  c.fillStyle = '#86b071'; c.fillRect(0, Y(.82), X(.33), Y(.04)); c.fillRect(X(.68), Y(.82), X(.32), Y(.03));
+  palm(c, X(.315), Y(.84), h * .4, t);
+  palm(c, X(1.01), Y(.92), h * .5, t + 1.1);
+};
+/* ドライブ：車の中から見た海沿いの道。左に海、右にヤシの並木。ハンドルは左（グアムは右側通行） */
+DRAW.drive = function (c, w, h, t) {
+  const X = v => v * w, Y = v => v * h;
+  const vx = X(.56), vy = Y(.44);  // 道の消失点
+  let g = c.createLinearGradient(0, 0, 0, vy); g.addColorStop(0, '#7fbfe4'); g.addColorStop(1, '#e6f3f3');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  for (let k = 0; k < 3; k++) { const cx = ((k * .37 + t * .006 * (1 + k * .4)) % 1.3) - .15; cloud(c, X(cx), Y(.12 + k * .05), w * .045 * (1 + (k % 2) * .5), 'rgba(255,255,255,.8)'); }
+  // 海（左）と遠くの岬（右）
+  g = c.createLinearGradient(0, vy, 0, Y(.75)); g.addColorStop(0, '#2b7fb0'); g.addColorStop(1, '#5cc2c9');
+  c.fillStyle = g; c.beginPath(); c.moveTo(0, vy); c.lineTo(vx, vy); c.lineTo(X(.12), Y(.75)); c.lineTo(0, Y(.75)); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.5)';
+  for (let k = 0; k < 14; k++) { const yy = Y(.46 + (k % 7) * .035); const xx = X((((k * .13) + t * .03) % .55) - .05); if (xx < vx - (yy - vy) * 1.3) c.fillRect(xx, yy, X(.03), Math.max(1, h * .0025)); }
+  c.fillStyle = '#5f8f62'; c.beginPath(); c.moveTo(vx, vy); c.quadraticCurveTo(X(.75), Y(.33), X(1), Y(.3)); c.lineTo(X(1), Y(.75)); c.lineTo(vx + X(.02), vy); c.closePath(); c.fill();
+  c.fillStyle = '#7aa874'; c.beginPath(); c.moveTo(vx + X(.01), vy); c.quadraticCurveTo(X(.8), Y(.42), X(1), Y(.44)); c.lineTo(X(1), Y(.75)); c.closePath(); c.fill();
+  // 道路
+  c.fillStyle = '#6f7378'; c.beginPath(); c.moveTo(vx - X(.006), vy); c.lineTo(vx + X(.006), vy); c.lineTo(X(1.15), Y(1)); c.lineTo(X(-.05), Y(1)); c.closePath(); c.fill();
+  c.strokeStyle = '#f2f2ee'; c.lineWidth = Math.max(1, h * .004);
+  c.beginPath(); c.moveTo(vx - X(.004), vy); c.lineTo(X(-.03), Y(1)); c.moveTo(vx + X(.004), vy); c.lineTo(X(1.12), Y(1)); c.stroke();
+  // 流れてくる中央線
+  const mx = X(.45);
+  for (let k = 0; k < 6; k++) {
+    const p0 = ((k / 6 + t * .35) % 1), p1 = Math.min(1, p0 + .06);
+    const f0 = p0 * p0, f1 = p1 * p1;
+    const y0 = vy + (Y(1) - vy) * f0, y1 = vy + (Y(1) - vy) * f1;
+    const x0 = vx + (mx - vx) * f0, x1 = vx + (mx - vx) * f1;
+    c.strokeStyle = '#f4d35e'; c.lineWidth = Math.max(1, h * .02 * f1 + 1);
+    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+  }
+  // ガードレール（海側）
+  c.strokeStyle = '#e9ecee'; c.lineWidth = Math.max(1, h * .006);
+  c.beginPath(); c.moveTo(vx - X(.01), vy + Y(.004)); c.lineTo(X(-.1), Y(.86)); c.stroke();
+  // 流れてくるヤシ（右側）
+  for (let k = 0; k < 4; k++) {
+    const p = ((k / 4 + t * .12) % 1), f = p * p;
+    const bx = vx + X(.03) + (X(1.25) - vx) * f, by = vy + (Y(1.05) - vy) * f;
+    if (bx < X(1.2)) palm(c, bx, by, h * (.06 + .9 * f), t + k);
+  }
+  // 日差し
+  const rg = c.createRadialGradient(X(.82), Y(.08), 0, X(.82), Y(.08), h * .5); rg.addColorStop(0, 'rgba(255,248,220,.55)'); rg.addColorStop(1, 'rgba(255,248,220,0)');
+  c.fillStyle = rg; c.fillRect(0, 0, w, h);
+  // 車内：天井・ピラー・ダッシュボード
+  c.fillStyle = '#26272b';
+  c.fillRect(0, 0, w, Y(.05));
+  c.beginPath(); c.moveTo(0, 0); c.lineTo(X(.06), 0); c.lineTo(X(.015), Y(.72)); c.lineTo(0, Y(.72)); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(w, 0); c.lineTo(X(.94), 0); c.lineTo(X(.985), Y(.72)); c.lineTo(w, Y(.72)); c.closePath(); c.fill();
+  g = c.createLinearGradient(0, Y(.7), 0, h); g.addColorStop(0, '#3a3b40'); g.addColorStop(1, '#1d1e21');
+  c.fillStyle = g; c.beginPath(); c.moveTo(0, Y(.76)); c.quadraticCurveTo(X(.5), Y(.68), w, Y(.76)); c.lineTo(w, h); c.lineTo(0, h); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.08)'; c.beginPath(); c.moveTo(0, Y(.76)); c.quadraticCurveTo(X(.5), Y(.68), w, Y(.76)); c.lineTo(w, Y(.775)); c.quadraticCurveTo(X(.5), Y(.695), 0, Y(.775)); c.closePath(); c.fill();
+  // ルームミラーと揺れるレイ
+  c.fillStyle = '#26272b'; c.fillRect(X(.497), Y(.05), X(.006), Y(.04));
+  c.beginPath(); c.roundRect(X(.44), Y(.085), X(.12), Y(.06), h * .015); c.fill();
+  c.fillStyle = '#9dc4d6'; c.fillRect(X(.448), Y(.095), X(.104), Y(.04));
+  c.save(); c.translate(X(.5), Y(.145)); c.rotate(Math.sin(t * 2.2) * .18);
+  for (let k = 0; k < 9; k++) { const a = Math.PI * (k / 8); circ(c, Math.cos(a) * h * .035, Math.sin(a) * h * .07, h * .011, ['#f28ca0', '#ffd36e', '#ffffff'][k % 3]); }
+  c.restore();
+  // ハンドル（左）
+  c.strokeStyle = '#151518'; c.lineWidth = h * .035;
+  c.beginPath(); c.ellipse(X(.27), Y(1.02), X(.15), Y(.2), 0, Math.PI * 1.08, Math.PI * 1.92); c.stroke();
+  c.fillStyle = '#151518'; c.fillRect(X(.255), Y(.88), X(.03), Y(.12));
+  c.fillStyle = '#c4a56a'; circ(c, X(.27), Y(.93), h * .018, '#c4a56a');
+  // 速度計の明かり
+  c.fillStyle = 'rgba(160,220,255,.5)'; c.fillRect(X(.235), Y(.78), X(.07), Y(.012));
+};
+
+/* 設定シートで新しく足したシーン用の汎用サンプル（空と水平線とシーン名） */
+DRAW.generic = function (c, w, h, t, sc) {
+  const X = v => v * w, Y = v => v * h, hue = hueOf(sc?.id || 'scene');
+  let g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, `hsl(${hue} 45% 82%)`); g.addColorStop(.62, `hsl(${(hue + 30) % 360} 45% 93%)`); g.addColorStop(1, `hsl(${(hue + 40) % 360} 30% 86%)`);
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  for (let k = 0; k < 4; k++) { const cx = ((k * .3 + t * .005 * (1 + k * .4)) % 1.3) - .15; cloud(c, X(cx), Y(.12 + k * .05), w * .045 * (1 + (k % 2) * .6), 'rgba(255,255,255,.7)'); }
+  c.fillStyle = `hsl(${hue} 30% 70%)`; c.beginPath(); c.moveTo(0, Y(.72));
+  for (let x = 0; x <= w; x += w / 40) c.lineTo(x, Y(.7) + Math.sin(x / w * 7 + t * .3) * h * .02);
+  c.lineTo(w, h); c.lineTo(0, h); c.closePath(); c.fill();
+  textC(c, sc?.en || 'Scene', X(.5), Y(.42), h * .12, 'rgba(255,255,255,.95)', 'italic 500');
+  if (sc?.ja) textC(c, sc.ja, X(.5), Y(.53), h * .045, 'rgba(60,60,60,.55)', '500');
+};
+
 /* =====================================================================
    シーンの素材（動画 or ポスター画像 or サンプル描画）
    動画の新しいフレームは requestVideoFrameCallback で検知する
@@ -939,7 +1162,7 @@ class Source {
     if (sources.length) this.setupVideo(sources);
   }
   setupVideo(list) {
-    const v = this.video = mk('video', { muted: true, playsinline: true, loop: true, preload: this.idx === START_SCENE ? 'auto' : 'metadata' });
+    const v = this.video = mk('video', { muted: true, playsinline: true, loop: true, preload: this.idx === START_IDX ? 'auto' : 'metadata' });
     v.muted = true;
     const usable = list.filter(s => !s.type || v.canPlayType(s.type));
     let k = 0;
@@ -970,10 +1193,10 @@ class Source {
     }
     if (this.lastDraw === t) return;
     this.lastDraw = t;
-    DRAW[this.sc.draw](this.ctx, PH_W, PH_H, t);
+    (DRAW[this.sc.draw] || DRAW.generic)(this.ctx, PH_W, PH_H, t, this.sc);
     const c = this.ctx;
     c.font = `italic 500 ${PH_H * .024}px "Cormorant Garamond", serif`; c.textAlign = 'right'; c.textBaseline = 'alphabetic';
-    c.fillStyle = 'rgba(40,45,50,.45)'; c.fillText(`Sample image ／ ${this.sc.video} を置くと動画に切り替わります`, PH_W - PH_H * .045, PH_H * .955);
+    c.fillStyle = 'rgba(40,45,50,.45)'; c.fillText(`Sample image ／ ドライブの scenes フォルダに ${this.sc.id}.mp4 を置くと動画に切り替わります`, PH_W - PH_H * .045, PH_H * .955);
     this.dirty = true;
   }
 }
@@ -1280,7 +1503,7 @@ const AI = {
    TOP ステージ
    ===================================================================== */
 const Stage = {
-  index: START_SCENE, sources: [], W: 0, H: 0, narrow: false,
+  index: START_IDX, sources: [], W: 0, H: 0, narrow: false,
   T: { active: false, from: 0, to: 0, start: 0, dur: REDUCED ? 1 : 1150 },
   pan: { x: 0, y: 0 }, panT: { x: 0, y: 0 }, zoom: EDIT || REDUCED ? 1 : 1.045,
   hover: null, spot: { x: .4, y: .4, w: .2, h: .2 }, spotAmt: 0,
@@ -1373,7 +1596,9 @@ const Stage = {
   },
 
   go(i) {
-    if (i < 0 || i >= SCENES.length || i === this.index || this.T.active) return;
+    if (i < 0 || i >= SCENES.length) return;
+    if (this.T.active) { this.pending = i === this.T.to ? null : i; return; }  // スライド中に押された移動は、終わってから行う
+    if (i === this.index) return;
     const T = this.T;
     T.active = true; T.from = this.index; T.to = i; T.start = performance.now();
     this.hover = null;
@@ -1391,6 +1616,8 @@ const Stage = {
     $('#peekL').classList.remove('swap'); $('#peekR').classList.remove('swap');
     this.peekDirty = true;
     this.syncPlayback();
+    const p = this.pending; this.pending = null;
+    if (p != null && p !== this.index) this.go(p);
   },
   applyHeader(i) {
     const sc = SCENES[i];
@@ -1563,15 +1790,27 @@ const Stage = {
     if (r.w < .005 || r.h < .005) return;
     const f = v => +v.toFixed(3), time = this.sources[this.index].time;
     const str = `x: ${f(r.x)}, y: ${f(r.y)}, w: ${f(r.w)}, h: ${f(r.h)}`;
-    navigator.clipboard?.writeText(str).catch(() => {});
-    toast(`コピーしました\n${str}${time != null ? `\n（動画 ${time.toFixed(2)} 秒時点。track に使う場合は t: ${time.toFixed(2)}）` : ''}`, 6000);
+    // タブ区切りでコピー：設定シート「クリック範囲」の x の欄に貼ると、x・y・幅・高さの 4 つの欄に入る
+    navigator.clipboard?.writeText([r.x, r.y, r.w, r.h].map(f).join('\t')).catch(() => {});
+    toast(`コピーしました（${str}）\n設定シート「クリック範囲」の x の欄に貼り付けてください`, 7000);
   }
 };
 
 /* =====================================================================
    TOP 下部のセクション
    ===================================================================== */
+/* メニューがロゴと重なるほど多いときは ≡ ボタンにまとめる */
+function fitNav() {
+  const root = document.documentElement, nav = $('#nav'), head = nav.parentElement;
+  root.classList.remove('nav-compact');
+  const narrow = innerWidth <= 820;
+  const over = !narrow && $('#logo').offsetWidth + nav.scrollWidth + 48 > head.clientWidth - parseFloat(getComputedStyle(head).paddingLeft) * 2;
+  root.classList.toggle('nav-compact', narrow || over);
+}
 function buildHome() {
+  $('#nav').replaceChildren(...[['#/', 'Top'], ['#/profile/groom', 'Groom'], ['#/profile/bride', 'Bride'], ...SCENES.map(sc => [`#/scene/${sc.id}`, sc.en])]
+    .map(([href, label]) => mk('a', { href }, label)));
+  fitNav(); addEventListener('resize', fitNav); document.fonts?.ready.then(fitNav);
   $('#logo').textContent = `${SITE.groom[0]} & ${SITE.bride[0]}`;
   $('#footNames').textContent = `${SITE.groom} & ${SITE.bride}`;
   $('#footDate').textContent = `${SITE.date}  ${SITE.place}`;
@@ -1798,12 +2037,16 @@ const Router = {
   home(sceneIdx, prevKey) {
     const wasHome = this.view === 'home';
     this.view = 'home'; this.key = '';
-    document.title = `${SITE.groom} & ${SITE.bride} | Our Wedding in ${SITE.place}`;
+    document.title = SITE.title || `${SITE.groom} & ${SITE.bride} | Our Wedding in ${SITE.place}`;
     $('#view-page').hidden = true; $('#view-page').replaceChildren();
     $('#view-home').hidden = false;
     if (sceneIdx >= 0) {
       if (wasHome) { scrollTo({ top: 0, behavior: REDUCED ? 'auto' : 'smooth' }); Stage.go(sceneIdx); }
-      else { Stage.index = sceneIdx; Stage.updateUI(false); scrollTo(0, 0); }
+      else {
+        Stage.pending = null;
+        if (Stage.T.active) { Stage.T.to = sceneIdx; Stage.finishTransition(); }
+        Stage.index = sceneIdx; Stage.updateUI(false); scrollTo(0, 0);
+      }
     } else if (!wasHome) scrollTo(0, Stage.savedScroll || 0);
     Stage.layout();
     Stage.syncPlayback();
@@ -2167,6 +2410,56 @@ class MellowEngine extends SynthEngine {
     return len;
   }
 }
+/** ドライブ：軽快なシティポップ風（エレピの和音、8分のベース、ハイハット、柔らかいキック） */
+class DriveEngine extends SynthEngine {
+  constructor(ctx, out) {
+    super(ctx, out, 1.9, 1.6, 3, 0.2);
+    this.noise = makeNoise(ctx, 1, false);
+    // Fmaj9 → Em7 → Dm9 → G13sus の循環（ベース, 和音）
+    this.prog = [[41, [57, 60, 64, 67]], [40, [55, 59, 62, 67]], [38, [57, 60, 64, 65]], [43, [57, 60, 65, 69]]];
+    this.scale = [72, 74, 76, 79, 81, 84]; this.mel = 2;
+  }
+  ep(m, t, vel, dur) {
+    const f = mtof(m);
+    this.pluckTone(f, t, 0.035 * vel, dur);
+    this.pluckTone(f * 2, t, 0.008 * vel, dur * 0.35);
+    this.pluckTone(f * 7.02, t, 0.0025 * vel, 0.18);
+  }
+  hat(t, vel, open) {
+    const c = this.ctx, s = c.createBufferSource(), hp = c.createBiquadFilter(), g = c.createGain(), d = open ? 0.18 : 0.045;
+    s.buffer = this.noise; hp.type = 'highpass'; hp.frequency.value = 8000;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.03 * vel, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    s.connect(hp); hp.connect(g); g.connect(this.dry); s.start(t, Math.random() * 0.8); s.stop(t + d + 0.02);
+  }
+  kick(t) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.22, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g); g.connect(this.out); o.start(t); o.stop(t + 0.32);
+  }
+  snap(t) {
+    const c = this.ctx, s = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noise; bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 0.8;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.07, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    s.connect(bp); bp.connect(g); g.connect(this.dry); s.start(t, Math.random() * 0.8); s.stop(t + 0.18);
+  }
+  tick(t, i) {
+    const e = 60 / 100 / 2, k = i % 8, [root, chord] = this.prog[Math.floor(i / 8) % 4];
+    if (k === 0 || k === 3) chord.forEach((m, j) => this.ep(m, t + j * 0.008, k ? 0.75 : 1, k ? 1.6 : 2.6));
+    if (k === 6 && Math.random() < 0.6) chord.slice(1).forEach(m => this.ep(m, t, 0.55, 0.6));
+    const bm = [root, root + 12, root, root + 7, root, root + 12, root + 10, root + 12][k];
+    this.pluckTone(mtof(bm), t, 0.13, 0.32, 'triangle');
+    this.hat(t, k % 2 ? 0.6 : 1, k === 7);
+    if (k === 0 || k === 5) this.kick(t);
+    if (k === 2 || k === 6) this.snap(t);
+    if (Math.random() < (k % 2 ? 0.18 : 0.32)) {
+      this.mel = clamp(this.mel + Math.round((Math.random() - 0.5) * 3), 0, this.scale.length - 1);
+      this.osc('square', mtof(this.scale[this.mel]), t, e * 0.8, 0.012, 0.01, 0.15, this.dry, 4);
+      this.osc('sine', mtof(this.scale[this.mel]), t, e * 0.8, 0.03, 0.01, 0.15);
+    }
+    return e;
+  }
+}
 /** 曲ファイル（ドライブの bgm/ から変換したもの） */
 class FileEngine {
   constructor(ctx, out, item) {
@@ -2179,7 +2472,7 @@ class FileEngine {
   fadeTo(v, sec) { const g = this.out.gain, now = this.ctx.currentTime; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(v, now + sec); }
   stop(sec = 2.5) { this.fadeTo(0, sec); setTimeout(() => { this.el.pause(); this.out.disconnect(); }, sec * 1000 + 200); }
 }
-const SYNTH = { chapel: [ChapelEngine], city: [TropicalEngine], beach: [MellowEngine, WavesEngine] };
+const SYNTH = { chapel: [ChapelEngine], city: [TropicalEngine], beach: [MellowEngine, WavesEngine], drive: [DriveEngine] };
 
 const Music = {
   ctx: null, on: false, cur: null, layers: [], ducked: false,
@@ -2231,6 +2524,7 @@ const Music = {
     if (Router.view === 'home') key = SCENES[Stage.T.active ? Stage.T.to : Stage.index]?.id;
     else key = (Router.key || '').split('/')[1];
     if (!key) return null;
+    for (const [name, list] of Object.entries(BGM.pick)) if (list.includes(key)) return name;
     for (const [name, list] of Object.entries(BGM.pick)) if (list.some(p => key.startsWith(p))) return name;
     return null;
   },
